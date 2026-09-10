@@ -1,0 +1,15 @@
+TicketDive出演者取得 regression sample
+
+入力例:
+iii!
+公演日時2026/9/20(日)
+開場時刻 15:00 / 開演時刻 16:00
+会場立川ステージガーデン
+出演iON! / iMiN! / iLiFE!
+TICKET INFO
+
+期待値:
+公演名: iii!
+アーティスト名: iON! / iMiN! / iLiFE!
+出演者数: 3
+出演者配列: ["iON!", "iMiN!", "iLiFE!"]
