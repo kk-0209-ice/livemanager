@@ -1,4 +1,0 @@
-name = "live-manager-ticketdive"
-main = "ticketdive-api-worker.js"
-compatibility_date = "2026-09-01"
-workers_dev = true
