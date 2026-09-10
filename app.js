@@ -571,7 +571,7 @@
         <button class="btn danger full" data-action="reset">全データを削除</button>
       </section>
       <div class="section-title"><h2>このバージョン</h2></div>
-      <section class="card"><b>Live Manager v4.1</b><p class="muted small" style="margin:8px 0 0">URL取り込み / TicketDive補助 / Googleカレンダー / 座席マップ / 一括スキャン / AI連携口 / Supabaseクラウド同期</p></section>`;
+      <section class="card"><b>Live Manager v4.2</b><p class="muted small" style="margin:8px 0 0">URL取り込み / TicketDive補助 / Googleカレンダー / 座席マップ / 一括スキャン / AI連携口 / Supabaseクラウド同期</p></section>`;
     bindActions();
   }
 
@@ -1396,7 +1396,7 @@
 
   async function requestTicketDiveJsonApi(target,url,label){
     const ctl=new AbortController();
-    const timer=setTimeout(()=>ctl.abort(),8000);
+    const timer=setTimeout(()=>ctl.abort(new Error("TicketDive API timeout")),12000);
     try{
       const r=await fetch(target,{
         method:"GET",
@@ -1926,7 +1926,10 @@
             }
           }catch(workerError){
             console.warn("[TicketDive API]",workerError);
-            setStatus(`TicketDive APIを利用できません。公演基本情報だけ公開Readerで取得します…`,"error");
+            const timeoutLike = workerError?.name==="AbortError" || /abort|timeout/i.test(String(workerError?.message||workerError||""));
+            setStatus(timeoutLike
+              ? "TicketDive APIの応答が時間内に返らなかったため、基本情報だけReaderで取得します。"
+              : `TicketDive APIを利用できません：${workerError?.message||workerError}`,"error");
           }
         }
 

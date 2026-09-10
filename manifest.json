@@ -6,7 +6,7 @@
   "background_color": "#0d0f14",
   "theme_color": "#111318",
   "lang": "ja",
-  "description": "Live Manager v4.1 - Cloudflare Pages内蔵TicketDive API対応",
+  "description": "Live Manager v4.2 - TicketDive Workerタイムアウト修正版",
   "icons": [
     {
       "src": "./icon.svg",

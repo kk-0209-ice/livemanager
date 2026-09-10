@@ -261,6 +261,9 @@ function mergeEvents(events, url) {
 }
 
 async function fetchVersion(target, userAgent) {
+  // 片方のUAが遅くてもWorker全体を待たせない。
+  // 4.5秒を超えたTicketDive取得は中断し、もう片方の成功結果だけで返す。
+  const signal=AbortSignal.timeout(4500);
   const r=await fetch(target,{
     method:"GET",
     headers:{
@@ -270,6 +273,7 @@ async function fetchVersion(target, userAgent) {
       "Cache-Control":"no-cache"
     },
     redirect:"follow",
+    signal,
     cf:{cacheTtl:120,cacheEverything:true}
   });
   if(!r.ok) throw new Error(`TicketDive HTTP ${r.status}`);

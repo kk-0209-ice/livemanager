@@ -48,7 +48,8 @@ async function fetchHtml(url,ua){
       "Accept-Language":"ja,en-US;q=0.8,en;q=0.6",
       "Cache-Control":"no-cache"
     },
-    redirect:"follow"
+    redirect:"follow",
+    signal:AbortSignal.timeout(4500)
   });
   if(!r.ok)throw new Error(`TicketDive HTTP ${r.status}`);
   return r.text();
