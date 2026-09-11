@@ -1,62 +1,47 @@
-# Live Manager v4.1 - GitHub Pages + TicketDive Worker 設定
+# GitHub Pages 公開手順 — Live Manager v4.3
 
-## 1. GitHubへアップロード
-リポジトリのルートに、このZIP内のファイルをアップロードします。
-最低限必要:
-- index.html
-- app.css
-- app.js
-- manifest.json
-- sw.js
-- icon.svg
-- .nojekyll
+このv4.3は、TicketDive専用Workerを最初から設定済みです。
 
-## 2. GitHub Pages
-GitHubリポジトリ:
-Settings → Pages
+## 利用者側の設定は不要
 
-Build and deployment:
-- Source: Deploy from a branch
-- Branch: main
-- Folder: /(root)
+公開Worker:
 
-Saveを押します。
+`https://live-manager-ticketdive.47frzzcfhy.workers.dev`
 
-## 3. Cloudflare Workerを作る
-Cloudflare:
-Workers & Pages → Create application → Worker
+このURLはアプリ内部に設定済みです。
+Live Managerを使う人が「TicketDive専用Worker URL」を入力する必要はありません。
 
-`server/ticketdive-api-worker.js` の内容をWorkerのコードへ全部貼り付け、
-Deployします。
+## GitHubへ更新する方法
 
-発行された workers.dev のURLをコピーします。
+1. `live-manager-v4.3-public-auto-ticketdive.zip` を解凍します。
+2. GitHubでLive Managerを公開しているリポジトリを開きます。
+3. `Add file` → `Upload files` を開きます。
+4. ZIPを解凍した中身をリポジトリのルートへ上書きアップロードします。
+5. `Commit changes` を押します。
+6. GitHub Pagesの更新後、ブラウザで `Ctrl + Shift + R` を押して強制再読み込みします。
 
-## 4. Worker確認
-Worker URLの末尾へ `/health` を付けて開きます。
+GitHub Pages設定は通常:
 
-以下が表示されれば正常:
-{"ok":true,"service":"live-manager-ticketdive-v4"}
+- Source: `Deploy from a branch`
+- Branch: `main`
+- Folder: `/(root)`
 
-## 5. Live Managerへ設定
-GitHub Pagesで公開したLive Managerを開きます。
+## 一般ユーザーの使い方
 
-その他 → 外部連携設定 → TicketDive専用Worker URL
+Live Managerで
 
-へWorkers URLを貼り付けます。
+`その他 → ライブURL取り込み`
 
-「Worker接続テスト」を押します。
+を開き、TicketDiveのイベントURLを貼って「URLから取得」を押すだけです。
 
-成功例:
-接続成功：iii! / 出演者 3組（iON! / iMiN! / iLiFE!）
+Worker URLの入力、Worker接続テスト、初期設定は不要です。
 
-その後「保存」を押します。
+## Cloudflare Workerについて
 
-## 6. TicketDive URLを試す
-ライブ追加 → URLから取り込み
-TicketDiveイベントURLを貼り付けます。
+現在のWorkerは削除しないでください。
 
-解析結果の取得元が
-- TicketDive専用Worker
-なら成功です。
+Workerを別URLへ変更した場合だけ、`app.js` の
 
-`TicketDive Reader` と出る場合はWorkerが未設定、または接続失敗しています。
+`PUBLIC_TICKETDIVE_WORKER_URL`
+
+を変更してGitHub Pagesへ再公開してください。

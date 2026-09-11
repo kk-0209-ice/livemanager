@@ -277,3 +277,15 @@ v4.1では以下の2方式に整理しました。
 解析結果の取得元が
 `Cloudflare Pages内蔵TicketDive API` または `TicketDive専用Worker`
 になっていることを確認してください。
+
+
+---
+
+# v4.3 公開版 TicketDive自動連携
+
+TicketDive Workerは次のURLをアプリに組み込み済みです。
+
+`https://live-manager-ticketdive.47frzzcfhy.workers.dev`
+
+一般ユーザーはWorker URLを入力する必要がありません。
+「ライブURL取り込み」にTicketDiveイベントURLを貼るだけで使用できます。

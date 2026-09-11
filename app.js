@@ -4,6 +4,7 @@
   const STORAGE_KEY = "live-manager-v3-data";
   const LEGACY_STORAGE_KEYS = ["live-manager-v2-data","live-manager-v1-data"];
   const APP_VERSION = 3;
+  const PUBLIC_TICKETDIVE_WORKER_URL = "https://live-manager-ticketdive.47frzzcfhy.workers.dev";
   const defaultData = {
     version: APP_VERSION,
     groups: [],
@@ -571,7 +572,7 @@
         <button class="btn danger full" data-action="reset">全データを削除</button>
       </section>
       <div class="section-title"><h2>このバージョン</h2></div>
-      <section class="card"><b>Live Manager v4.2</b><p class="muted small" style="margin:8px 0 0">URL取り込み / TicketDive補助 / Googleカレンダー / 座席マップ / 一括スキャン / AI連携口 / Supabaseクラウド同期</p></section>`;
+      <section class="card"><b>Live Manager v4.3</b><p class="muted small" style="margin:8px 0 0">TicketDive自動連携 / URL取り込み / Googleカレンダー / 座席マップ / 一括スキャン / AI連携口 / Supabaseクラウド同期</p></section>`;
     bindActions();
   }
 
@@ -1385,12 +1386,18 @@
     return api.toString();
   }
 
+  function publicTicketDiveWorkerTarget(url){
+    const api=new URL(PUBLIC_TICKETDIVE_WORKER_URL);
+    api.searchParams.set("url",url);
+    return api.toString();
+  }
+
   function ticketDiveApiTargets(url){
-    const out=[];
+    const out=[
+      {target:publicTicketDiveWorkerTarget(url),label:"TicketDive自動連携"}
+    ];
     const auto=automaticTicketDiveApiTarget(url);
-    if(auto)out.push({target:auto,label:"内蔵TicketDive API"});
-    const configured=configuredProxyTarget(url);
-    if(configured && configured!==auto)out.push({target:configured,label:"設定済みTicketDive Worker"});
+    if(auto && auto!==out[0].target)out.push({target:auto,label:"内蔵TicketDive API"});
     return out;
   }
 
@@ -1441,7 +1448,7 @@
     return null;
   }
   function hasConfiguredTicketDiveWorker(){
-    return !!String(state.settings.urlProxy||"").trim();
+    return !!PUBLIC_TICKETDIVE_WORKER_URL;
   }
 
   function isGitHubPages(){
@@ -1854,7 +1861,7 @@
       box.innerHTML=`<b>出演者取得：</b>${safe(names.join(" / "))} <span class="pill">${names.length}組</span>${method?` <span class="pill green">${safe(method)}</span>`:""}`;
     }else{
       box.className="warning";
-      box.innerHTML=`<b>出演者：</b>未取得です。GitHub Pagesでは「その他 → 外部連携設定」にTicketDive専用Worker URLを設定してください。Cloudflare Pages版では内蔵APIを自動使用します。`;
+      box.innerHTML=`<b>出演者：</b>自動連携から取得できませんでした。しばらくしてから再試行してください。基本情報は取得できている場合があります。`;
     }
     box.style.display="block";
   }
@@ -1889,10 +1896,10 @@
   }
   function renderUrlImport(){
     pageTitle("ライブURL取り込み");
-    main.innerHTML=`<section class="card hero"><div class="kicker">URL IMPORT</div><h2>TicketDiveのURLから公演情報を取り込む</h2><p class="muted">TicketDiveはAPI経由で公演名・出演者・日付・会場・開場/開演をまとめて取得します。Cloudflare Pages版なら設定不要、GitHub Pages版は専用Worker URLを1回設定してください。</p></section>
+    main.innerHTML=`<section class="card hero"><div class="kicker">URL IMPORT</div><h2>TicketDiveのURLから公演情報を取り込む</h2><p class="muted">TicketDiveは自動連携API経由で公演名・出演者・日付・会場・開場/開演をまとめて取得します。利用者によるWorker URLの設定は不要です。</p></section>
       <section class="card" style="margin-top:12px"><div class="form"><div class="field"><label>TicketDiveイベントURL</label><input id="importUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://ticketdive.com/event/..."></div><div class="grid two"><button class="btn" id="fetchImport">URLから取得</button><button class="btn secondary" id="openImportUrl">ページを開く</button></div><div id="importStatus" class="notice" style="display:none"></div><div id="performerImportStatus" class="notice" style="display:none;margin-top:8px"></div><div class="divider"></div><details><summary class="small" style="cursor:pointer;font-weight:800">取得できない場合の手動解析</summary><div class="field" style="margin-top:12px"><label>ページ本文を貼り付け</label><textarea id="importText" style="min-height:180px" placeholder="TicketDiveのイベントページ本文を貼り付け"></textarea></div><button class="btn secondary full" id="parseImportText">貼り付け内容を解析</button></details></div></section>
       <div id="importPreview" style="margin-top:12px"></div>
-      <section class="notice" style="margin-top:12px">画面に「TicketDive Reader」と出る場合、出演者取得APIは未接続です。Cloudflare Pagesでは内蔵APIを自動利用します。GitHub Pagesでは「その他 → 外部連携設定」に専用Worker URLを設定してください。</section>`;
+      <section class="notice" style="margin-top:12px">通常はTicketDive自動連携を使用します。「TicketDive Reader」と表示された場合は自動連携が一時的に利用できず、基本情報取得へフォールバックしています。</section>`;
     const status=$("#importStatus"),btn=$("#fetchImport"),urlInput=$("#importUrl");
     function setStatus(msg,type="info"){
       status.style.display="block";status.className=type==="error"?"warning":"notice";status.textContent=msg;
@@ -2057,25 +2064,25 @@
   async function saveBatchCheki(form){const memberId=formValue(form,"memberId");if(!memberId){toast("メンバーを選択してください");return}const ids=[...batchSession.selected].sort((a,b)=>a-b);if(!ids.length){toast("保存対象を選択してください");return}try{toast(`${ids.length}枚を保存中…`);for(const i of ids){const blob=await cropRectBlob(batchSession.sourceCanvas,batchSession.regions[i]),thumb=await makeThumbnail(blob),id=uid("img"),meta={id,memberId,liveId:formValue(form,"liveId"),date:formValue(form,"date")||todayStr(),type:formValue(form,"type"),signed:false,favorite:false,memo:"一括スキャン",chekiNo:nextChekiNo(memberId),createdAt:new Date().toISOString()};await mediaPut(id,blob,thumb);state.chekiImages.push(meta)}save();batchSession={sourceCanvas:null,regions:[],selected:new Set()};toast(`${ids.length}枚保存しました`);setRoute("album")}catch(e){console.error(e);alert("一括保存に失敗しました")}}
 
   function renderIntegrations(){
-    pageTitle("外部連携設定");main.innerHTML=`<section class="card hero"><div class="kicker">INTEGRATIONS</div><h2>TicketDive・AI連携設定</h2><p class="muted">GitHub Pagesを使う場合のみTicketDive専用Worker URLを設定します。Cloudflare Pagesでは内蔵APIを自動利用するため、この設定は不要です。</p></section><section class="card" style="margin-top:12px"><form id="integrationForm" class="form"><div class="field"><label>TicketDive専用Worker URL</label><input name="urlProxy" value="${safe(state.settings.urlProxy||"")}" placeholder="https://live-manager-ticketdive.YOUR.workers.dev/?url={url}"></div><div class="muted small">GitHub Pages用です。ZIP内 server/ticketdive-api-worker.js をCloudflare Workersへデプロイし、そのURLを設定します。Cloudflare Pagesでサイトを公開する場合は未設定のままで構いません。</div><div class="btn-row"><button type="button" class="btn secondary" id="testTicketDiveWorker">Worker接続テスト</button></div><div id="workerTestStatus" class="notice" style="display:none"></div><div class="field"><label>AIメンバー候補 API（任意）</label><input name="aiEndpoint" value="${safe(state.settings.aiEndpoint||"")}" placeholder="https://your-api.example/analyze-cheki"></div><div class="muted small">画像と候補メンバー一覧をPOSTし、memberId / confidence を返す自作API向けです。OpenAI等の秘密APIキーはこの画面へ直接入力しないでください。</div><button class="btn full" type="submit">保存</button></form></section><section class="notice" style="margin-top:12px">TicketDive連携は公開公演情報の取り込みだけを行います。ログイン・購入・認証操作は行いません。</section>`;
+    pageTitle("外部連携設定");
+    main.innerHTML=`<section class="card hero"><div class="kicker">INTEGRATIONS</div><h2>外部連携</h2><p class="muted">TicketDive連携は公開版に組み込み済みです。利用者がWorker URLを入力する必要はありません。</p></section>
+      <section class="card" style="margin-top:12px">
+        <div class="row"><div><b>TicketDive連携</b><div class="muted small" style="margin-top:5px">公演情報・出演者情報のURL取り込み</div></div><span class="pill green">自動設定済み</span></div>
+        <div class="notice" style="margin-top:12px">TicketDiveのイベントURLを「ライブURL取り込み」に貼るだけで利用できます。</div>
+      </section>
+      <section class="card" style="margin-top:12px">
+        <form id="integrationForm" class="form">
+          <div class="field"><label>AIメンバー候補 API（任意）</label><input name="aiEndpoint" value="${safe(state.settings.aiEndpoint||"")}" placeholder="https://your-api.example/analyze-cheki"></div>
+          <div class="muted small">画像と候補メンバー一覧をPOSTし、memberId / confidence を返す自作API向けです。OpenAI等の秘密APIキーはこの画面へ直接入力しないでください。</div>
+          <button class="btn full" type="submit">AI連携設定を保存</button>
+        </form>
+      </section>
+      <section class="notice" style="margin-top:12px">TicketDive連携は公開公演情報の取り込みだけを行います。ログイン・購入・認証操作は行いません。</section>`;
     const form=$("#integrationForm");
-    form.onsubmit=e=>{e.preventDefault();state.settings.urlProxy=formValue(e.currentTarget,"urlProxy");state.settings.aiEndpoint=formValue(e.currentTarget,"aiEndpoint");commit("連携設定を保存しました")};
-    $("#testTicketDiveWorker").onclick=async()=>{
-      const box=$("#workerTestStatus"),input=form.elements.urlProxy;
-      const previous=state.settings.urlProxy;
-      state.settings.urlProxy=input.value.trim();
-      box.style.display="block";box.className="notice";box.textContent="Workerへ接続しています…";
-      try{
-        const testUrl="https://ticketdive.com/event/iii-260920";
-        const r=await fetchTicketDiveWorkerData(testUrl);
-        if(!r)throw new Error("Worker URLが未設定です");
-        box.className="notice";
-        box.textContent=`接続成功：${r.event.title||"公演"} / 出演者 ${r.event.performerNames.length}組${r.event.performers?`（${r.event.performers}）`:""}`;
-      }catch(err){
-        box.className="warning";box.textContent=`接続失敗：${err.message}`;
-      }finally{
-        state.settings.urlProxy=previous;
-      }
+    form.onsubmit=e=>{
+      e.preventDefault();
+      state.settings.aiEndpoint=formValue(e.currentTarget,"aiEndpoint");
+      commit("AI連携設定を保存しました");
     };
   }
 

@@ -1,5 +1,5 @@
-const CACHE="live-manager-v4.2";
-const ASSETS=["./","./index.html","./app.css?v=3.5","./app.js?v=3.5","./manifest.json?v=3.5","./icon.svg"];
+const CACHE="live-manager-v4.3-public";
+const ASSETS=["./","./index.html","./app.css?v=4.3","./app.js?v=4.3","./manifest.json?v=4.3","./icon.svg"];
 self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener("activate",e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener("fetch",e=>{

@@ -1,12 +1,12 @@
 {
-  "name": "Live Manager v3.5",
+  "name": "Live Manager v4.3",
   "short_name": "Live Manager",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0d0f14",
   "theme_color": "#111318",
   "lang": "ja",
-  "description": "Live Manager v4.2 - TicketDive Workerタイムアウト修正版",
+  "description": "Live Manager v4.3 - TicketDive Worker自動設定済み公開版",
   "icons": [
     {
       "src": "./icon.svg",

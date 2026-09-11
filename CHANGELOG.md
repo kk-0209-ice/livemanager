@@ -1,3 +1,12 @@
+# v4.3
+
+- TicketDive Workerを公開版へ自動設定
+- 固定Worker: `https://live-manager-ticketdive.47frzzcfhy.workers.dev`
+- 「TicketDive専用Worker URL」入力欄を一般ユーザー向け画面から削除
+- Worker初期設定・接続テストを不要化
+- TicketDive URL取り込み画面を公開版向けに変更
+- Service Workerキャッシュをv4.3へ更新
+
 # CHANGELOG
 
 ## v4.1
