@@ -23,7 +23,7 @@
       urlProxy: "",
       aiEndpoint: "",
       cloud: { supabaseUrl:"", anonKey:"", email:"", syncImages:true },
-      scanDefaults: { memberId:"", liveId:"", date:"", type:"2ショット", signed:false, favorite:false }
+      scanDefaults: { memberId:"", liveId:"", date:"", type:"2ショット", signed:false, favorite:false, filmSize:"mini", reflectionRemoval:true }
     }
   };
 
@@ -32,6 +32,14 @@
   let params = {};
   let calendarCursor = new Date();
   let scanSession = { sourceCanvas:null, corners:null, dragIndex:-1, lastMeta:null, detection:null, tone:"natural", ratioMode:"cheki", rotation:0, quality:null, previewCanvas:null };
+  let instaxSession = {
+    phase:"start", filmSize:"mini", reflectionRemoval:true,
+    stream:null, detectorTimer:null, detecting:false, liveDetection:null, stableCount:0,
+    sourceCanvas:null, corners:null, detection:null, baseCanvas:null, finalCanvas:null,
+    reflectionShots:[], reflectionIndex:0,
+    edit:{brightness:0,contrast:0,saturation:0,warmth:0},
+    quality:null, zoom:null, dragIndex:-1
+  };
   let batchSession = { sourceCanvas:null, regions:[], selected:new Set() };
   let albumFilter = { memberId:"", liveId:"", month:"", signed:"", favorite:"", q:"", sort:"newest" };
 
@@ -100,6 +108,7 @@
   }
 
   function setRoute(next, nextParams={}){
+    if(route==="scan" && next!=="scan") stopInstaxCamera();
     route=next; params=nextParams;
     $$(".nav-item[data-route]").forEach(b=>b.classList.toggle("active",b.dataset.route===route));
     render(); window.scrollTo({top:0,behavior:"smooth"});
@@ -120,7 +129,7 @@
     else if(route==="search") renderSearch();
     else if(route==="stats") renderStats();
     else if(route==="field") renderFieldMode();
-    else if(route==="scan") renderScan();
+    else if(route==="scan") renderInstaxScan();
     else if(route==="album") renderAlbum();
     else if(route==="cheki-storage") renderChekiStorage();
     else if(route==="cheki-tickets") renderChekiTickets();
@@ -575,7 +584,7 @@
         <button class="btn danger full" data-action="reset">全データを削除</button>
       </section>
       <div class="section-title"><h2>このバージョン</h2></div>
-      <section class="card"><b>Live Manager v5.0</b><p class="muted small" style="margin:8px 0 0">Cheki Studio / 高精度スキャン / チェキ管理・保存 / TicketDive自動連携 / クラウド同期</p></section>`;
+      <section class="card"><b>Live Manager v6.0</b><p class="muted small" style="margin:8px 0 0">Cheki Scan 2.0 / ライブカメラ検出 / 4枚反射低減 / チェキ管理・保存 / TicketDive自動連携</p></section>`;
     bindActions();
   }
 
@@ -986,6 +995,403 @@
     if(!q)return `<div class="muted small">補正プレビューを作成すると品質を診断します。</div>`;
     const cls=q.score>=85?"quality-good":q.score>=65?"quality-ok":q.score>=45?"quality-warn":"quality-bad";
     return `<div class="scan-quality ${cls}"><div><span class="quality-score">${q.score}</span><small>/100</small></div><div><b>${safe(q.label)}</b><div class="muted small">${q.warnings.length?safe(q.warnings.join(" / ")):"解像感・明るさとも良好です"}</div></div></div>`;
+  }
+
+
+  function resetInstaxSession(keepPrefs=true){
+    stopInstaxCamera();
+    const d=state.settings.scanDefaults||{};
+    instaxSession={
+      phase:"start",
+      filmSize:keepPrefs?(instaxSession.filmSize||d.filmSize||"mini"):(d.filmSize||"mini"),
+      reflectionRemoval:keepPrefs?!!instaxSession.reflectionRemoval:(d.reflectionRemoval!==false),
+      stream:null,detectorTimer:null,detecting:false,liveDetection:null,stableCount:0,
+      sourceCanvas:null,corners:null,detection:null,baseCanvas:null,finalCanvas:null,
+      reflectionShots:[],reflectionIndex:0,
+      edit:{brightness:0,contrast:0,saturation:0,warmth:0},quality:null,zoom:null,dragIndex:-1
+    };
+  }
+
+  function filmSizeTabs(){
+    return `<div class="film-size-tabs">
+      ${[["mini","mini","54 × 86"],["square","SQUARE","72 × 86"],["wide","WIDE","108 × 86"]].map(([k,n,s])=>`<button type="button" data-film="${k}" class="${instaxSession.filmSize===k?"active":""}"><b>${n}</b><small>${s} mm</small></button>`).join("")}
+    </div>`;
+  }
+
+  function reflectionLabel(){
+    return instaxSession.reflectionRemoval?"反射低減 ON（4枚合成）":"反射低減 OFF（1枚撮影）";
+  }
+
+  function renderInstaxScan(){
+    pageTitle("チェキスキャン");
+    const p=instaxSession.phase;
+    if(p==="start") renderInstaxStart();
+    else if(p==="camera") renderInstaxCamera();
+    else if(p==="adjust") renderInstaxAdjust();
+    else if(p==="edit") renderInstaxEdit();
+    else if(p==="meta") renderInstaxMeta();
+  }
+
+  function renderInstaxStart(){
+    const d=state.settings.scanDefaults||{};
+    if(!instaxSession.filmSize)instaxSession.filmSize=d.filmSize||"mini";
+    main.innerHTML=`
+      <section class="card hero instax-scan-hero">
+        <div class="kicker">CHEKI SCAN 2.0</div>
+        <h2>プリントを選ぶだけで、きれいにデジタル化</h2>
+        <p class="muted">フィルムサイズを先に指定して輪郭候補を絞り込みます。カメラでは検出できると緑枠になります。</p>
+      </section>
+      <section class="card" style="margin-top:12px">
+        <div class="scan-section-label">1. チェキサイズ</div>
+        ${filmSizeTabs()}
+        <div class="divider"></div>
+        <label class="reflection-toggle"><span><b>反射低減</b><small>角度を変えて4回撮影し、反射・映り込みを低減</small></span><input id="reflectionToggle" type="checkbox" ${instaxSession.reflectionRemoval?"checked":""}></label>
+      </section>
+      <section class="scan-launch-grid">
+        <button class="scan-launch primary" id="startLiveCamera"><span>📷</span><div><b>カメラでスキャン</b><small>緑枠を確認してSTART</small></div></button>
+        <label class="scan-launch"><span>🖼️</span><div><b>写真から読み込む</b><small>撮影済み画像を補正</small></div><input id="instaxFile" type="file" accept="image/*" hidden></label>
+      </section>
+      <section class="scan-guide-card">
+        <b>きれいにスキャンするコツ</b>
+        <div class="scan-guide-row"><span>①</span><p>チェキ全体を画面内に入れる</p></div>
+        <div class="scan-guide-row"><span>②</span><p>できるだけ中央に置き、影を避ける</p></div>
+        <div class="scan-guide-row"><span>③</span><p>反射低減ONなら案内に沿ってスマホを少し動かす</p></div>
+      </section>`;
+    $$("[data-film]").forEach(b=>b.onclick=()=>{instaxSession.filmSize=b.dataset.film;renderInstaxStart()});
+    $("#reflectionToggle").onchange=e=>instaxSession.reflectionRemoval=e.target.checked;
+    $("#startLiveCamera").onclick=startInstaxCamera;
+    $("#instaxFile").onchange=e=>{const f=e.target.files?.[0];if(f)loadInstaxPhoto(f)};
+  }
+
+  async function startInstaxCamera(){
+    if(!navigator.mediaDevices?.getUserMedia){
+      alert("このブラウザではカメラを直接起動できません。「写真から読み込む」を使用してください。");return;
+    }
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:{ideal:"environment"},width:{ideal:2560},height:{ideal:1920}},audio:false
+      });
+      instaxSession.stream=stream;instaxSession.phase="camera";instaxSession.reflectionShots=[];instaxSession.reflectionIndex=0;
+      renderInstaxCamera();
+    }catch(e){
+      console.error(e);
+      alert("カメラを起動できませんでした。ブラウザのカメラ許可を確認するか、「写真から読み込む」を使用してください。");
+    }
+  }
+
+  function stopInstaxCamera(){
+    clearTimeout(instaxSession?.detectorTimer);
+    instaxSession.detectorTimer=null;instaxSession.detecting=false;
+    if(instaxSession?.stream){
+      try{instaxSession.stream.getTracks().forEach(t=>t.stop())}catch(e){}
+      instaxSession.stream=null;
+    }
+  }
+
+  function reflectionInstruction(){
+    const steps=[
+      ["1 / 4","まず正面から","チェキを中央に合わせて撮影"],
+      ["2 / 4","スマホを少し左上へ","緑枠が出たら撮影"],
+      ["3 / 4","スマホを少し右上へ","緑枠が出たら撮影"],
+      ["4 / 4","スマホを少し下へ","緑枠が出たら撮影"]
+    ];
+    return steps[Math.min(instaxSession.reflectionIndex,3)];
+  }
+
+  function renderInstaxCamera(){
+    const ref=instaxSession.reflectionRemoval,step=reflectionInstruction();
+    main.innerHTML=`
+      <section class="camera-scan-screen">
+        <div class="camera-scan-top">
+          <button class="icon-btn ghost" id="closeCamera">×</button>
+          <div class="camera-format"><b>${safe(ChekiScanner.formatInfo(instaxSession.filmSize).label)}</b><small>${ref?"反射低減":"通常スキャン"}</small></div>
+          <button class="camera-help" id="cameraHelp">?</button>
+        </div>
+        <div class="live-camera-wrap" id="liveCameraWrap">
+          <video id="liveScanVideo" autoplay muted playsinline></video>
+          <canvas id="liveScanOverlay"></canvas>
+          <div class="camera-center-guide"></div>
+          <div class="camera-status" id="cameraStatus"><span class="camera-status-dot"></span><b>チェキを探しています…</b></div>
+          ${ref?`<div class="reflection-step"><b>${step[0]} ${step[1]}</b><small>${step[2]}</small></div>`:""}
+        </div>
+        <div class="camera-controls">
+          <div class="camera-setting-row">
+            <button class="camera-chip ${ref?"active":""}" id="toggleReflectionCamera">${ref?"✦ 反射低減 ON":"反射低減 OFF"}</button>
+            <div class="camera-zoom hidden" id="cameraZoomWrap"><span>−</span><input id="cameraZoom" type="range"><span>＋</span></div>
+          </div>
+          <button class="scan-start-button" id="scanStartButton" disabled><span>START</span></button>
+          <button class="camera-manual" id="manualCapture">緑枠が出ない場合は手動で撮影</button>
+        </div>
+      </section>`;
+    const video=$("#liveScanVideo");
+    video.srcObject=instaxSession.stream;
+    video.onloadedmetadata=async()=>{
+      try{await video.play()}catch(e){}
+      setupCameraZoom();
+      startLiveDetection();
+    };
+    $("#closeCamera").onclick=()=>{resetInstaxSession(true);renderInstaxScan()};
+    $("#toggleReflectionCamera").onclick=()=>{
+      instaxSession.reflectionRemoval=!instaxSession.reflectionRemoval;
+      instaxSession.reflectionShots=[];instaxSession.reflectionIndex=0;
+      renderInstaxCamera();
+    };
+    $("#scanStartButton").onclick=()=>captureInstaxFrame(false);
+    $("#manualCapture").onclick=()=>captureInstaxFrame(true);
+    $("#cameraHelp").onclick=()=>openModal("スキャンのコツ",`<div class="stack"><p>プリント全体を入れ、なるべく中央・正面から撮影してください。</p><p>反射低減では4回の撮影ごとにスマホ位置を少し変えます。各画像を同じ形に補正したあと合成し、強い反射を抑えます。</p></div>`);
+  }
+
+  function setupCameraZoom(){
+    try{
+      const track=instaxSession.stream?.getVideoTracks?.()[0],caps=track?.getCapabilities?.();
+      if(!caps?.zoom)return;
+      const wrap=$("#cameraZoomWrap"),input=$("#cameraZoom");if(!wrap||!input)return;
+      wrap.classList.remove("hidden");input.min=caps.zoom.min;input.max=caps.zoom.max;input.step=caps.zoom.step||.1;
+      const settings=track.getSettings?.()||{};input.value=settings.zoom||caps.zoom.min;
+      input.oninput=async()=>{try{await track.applyConstraints({advanced:[{zoom:Number(input.value)}]})}catch(e){}};
+    }catch(e){}
+  }
+
+  function videoFrameCanvas(video,max=760){
+    const vw=video.videoWidth||1280,vh=video.videoHeight||720,sc=Math.min(1,max/Math.max(vw,vh));
+    const c=document.createElement("canvas");c.width=Math.max(1,Math.round(vw*sc));c.height=Math.max(1,Math.round(vh*sc));
+    c.getContext("2d").drawImage(video,0,0,c.width,c.height);return c;
+  }
+
+  function detectionStable(prev,next,w,h){
+    if(!prev?.corners||!next?.corners)return false;
+    const diag=Math.hypot(w,h)||1;
+    const d=next.corners.reduce((s,p,i)=>s+dist(p,prev.corners[i]),0)/4/diag;
+    return d<.018;
+  }
+
+  function drawLiveDetection(result,analysis){
+    const video=$("#liveScanVideo"),overlay=$("#liveScanOverlay"),status=$("#cameraStatus"),start=$("#scanStartButton");
+    if(!video||!overlay||!status||!start)return;
+    overlay.width=video.videoWidth||analysis.width;overlay.height=video.videoHeight||analysis.height;
+    const ctx=overlay.getContext("2d");ctx.clearRect(0,0,overlay.width,overlay.height);
+    const sx=overlay.width/analysis.width,sy=overlay.height/analysis.height;
+    if(result?.corners){
+      const pts=result.corners.map(p=>({x:p.x*sx,y:p.y*sy}));
+      const good=result.confidence>=.43;
+      ctx.lineWidth=Math.max(5,overlay.width/260);
+      ctx.strokeStyle=good?"#3ee789":"#fbbf24";
+      ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=12;
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<4;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.closePath();ctx.stroke();ctx.shadowBlur=0;
+      pts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,8,0,Math.PI*2);ctx.fillStyle=ctx.strokeStyle;ctx.fill()});
+      instaxSession.videoCorners=pts;
+      const stable=good&&instaxSession.stableCount>=1;
+      status.classList.toggle("ready",stable);
+      status.querySelector("b").textContent=stable?"検出しました。STARTを押してください":"位置を調整してください";
+      start.disabled=!good;
+    }else{
+      start.disabled=true;status.classList.remove("ready");status.querySelector("b").textContent="チェキを探しています…";
+    }
+  }
+
+  function startLiveDetection(){
+    clearTimeout(instaxSession.detectorTimer);
+    const tick=async()=>{
+      if(instaxSession.phase!=="camera"||!instaxSession.stream)return;
+      const video=$("#liveScanVideo");
+      if(!video||video.readyState<2){instaxSession.detectorTimer=setTimeout(tick,350);return}
+      if(instaxSession.detecting){instaxSession.detectorTimer=setTimeout(tick,250);return}
+      instaxSession.detecting=true;
+      try{
+        const c=videoFrameCanvas(video,720);
+        const result=await ChekiScanner.detectCorners(c,{format:instaxSession.filmSize});
+        if(detectionStable(instaxSession.liveDetection,result,c.width,c.height))instaxSession.stableCount++;
+        else instaxSession.stableCount=0;
+        instaxSession.liveDetection=result;instaxSession.analysisSize={w:c.width,h:c.height};
+        drawLiveDetection(result,c);
+      }catch(e){console.warn(e)}
+      finally{
+        instaxSession.detecting=false;
+        instaxSession.detectorTimer=setTimeout(tick,380);
+      }
+    };
+    tick();
+  }
+
+  async function captureRawVideoCanvas(){
+    const video=$("#liveScanVideo");
+    if(!video||video.readyState<2)throw new Error("camera not ready");
+    const c=document.createElement("canvas");c.width=video.videoWidth;c.height=video.videoHeight;c.getContext("2d").drawImage(video,0,0,c.width,c.height);return c;
+  }
+
+  async function captureInstaxFrame(manual=false){
+    const btn=$("#scanStartButton");if(btn)btn.disabled=true;
+    try{
+      const raw=await captureRawVideoCanvas();
+      let det=instaxSession.liveDetection;
+      const a=instaxSession.analysisSize;
+      if(!det?.corners||manual||det.confidence<.25)det=await ChekiScanner.detectCorners(raw,{format:instaxSession.filmSize});
+      let corners;
+      if(det?.corners&&a&&!manual&&instaxSession.liveDetection===det){
+        corners=det.corners.map(p=>({x:p.x*raw.width/a.w,y:p.y*raw.height/a.h}));
+      }else corners=det?.corners||ChekiScanner.defaultCorners(raw,instaxSession.filmSize);
+
+      if(instaxSession.reflectionRemoval){
+        const cropped=await ChekiScanner.crop(raw,corners,{format:instaxSession.filmSize,maxLongEdge:1500});
+        instaxSession.reflectionShots.push(cropped);
+        instaxSession.reflectionIndex++;
+        if(instaxSession.reflectionIndex<4){
+          instaxSession.liveDetection=null;instaxSession.stableCount=0;
+          renderInstaxCamera();
+          toast(`${instaxSession.reflectionIndex}枚目を保存しました`);
+          return;
+        }
+        toast("4枚を合成して反射を低減中…");
+        const combined=ChekiScanner.combineGlareFrames(instaxSession.reflectionShots);
+        stopInstaxCamera();
+        instaxSession.baseCanvas=combined;
+        instaxSession.sourceCanvas=combined;
+        instaxSession.corners=ChekiScanner.defaultCorners(combined,instaxSession.filmSize);
+        instaxSession.detection={engine:"4枚反射低減合成",confidence:1};
+        instaxSession.edit=ChekiScanner.autoEdit(combined);
+        instaxSession.quality=ChekiScanner.quality(combined,1);
+        instaxSession.phase="edit";
+        renderInstaxEdit();
+      }else{
+        stopInstaxCamera();
+        instaxSession.sourceCanvas=raw;instaxSession.corners=corners;instaxSession.detection=det;
+        instaxSession.phase="adjust";renderInstaxAdjust();
+      }
+    }catch(e){console.error(e);alert("撮影に失敗しました。もう一度お試しください。");if(btn)btn.disabled=false}
+  }
+
+  async function loadInstaxPhoto(file){
+    try{
+      toast("写真を解析しています…");
+      const bmp=await createImageBitmap(file),max=3200,sc=Math.min(1,max/Math.max(bmp.width,bmp.height));
+      const c=document.createElement("canvas");c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);bmp.close?.();
+      const det=await ChekiScanner.detectCorners(c,{format:instaxSession.filmSize});
+      instaxSession.sourceCanvas=c;instaxSession.corners=det.corners;instaxSession.detection=det;instaxSession.phase="adjust";
+      renderInstaxAdjust();
+    }catch(e){console.error(e);alert("画像を読み込めませんでした。")}
+  }
+
+  function renderInstaxAdjust(){
+    const conf=Math.round((instaxSession.detection?.confidence||0)*100);
+    main.innerHTML=`
+      <section class="scan-progress"><span class="done">1 撮影</span><span class="active">2 四隅</span><span>3 画質</span><span>4 保存</span></section>
+      <section class="card">
+        <div class="row"><div><b>四隅を確認</b><div class="muted small">${safe(instaxSession.detection?.engine||"自動検出")} · 信頼度 ${conf}%</div></div><button class="btn small secondary" id="redetectInstax">再検出</button></div>
+        <canvas id="instaxCornerCanvas" class="scan-canvas instax-corner-canvas"></canvas>
+        <div class="notice">4つの丸をチェキ外枠の角へ合わせてください。ここを正確にすると台形補正の仕上がりが大きく改善します。</div>
+        <div class="grid two" style="margin-top:12px"><button class="btn secondary" id="restartInstaxScan">撮り直す</button><button class="btn" id="confirmInstaxCorners">この四隅で補正</button></div>
+      </section>`;
+    mountInstaxCornerEditor();
+    $("#redetectInstax").onclick=async()=>{const r=await ChekiScanner.detectCorners(instaxSession.sourceCanvas,{format:instaxSession.filmSize});instaxSession.corners=r.corners;instaxSession.detection=r;renderInstaxAdjust()};
+    $("#restartInstaxScan").onclick=()=>{resetInstaxSession(true);renderInstaxScan()};
+    $("#confirmInstaxCorners").onclick=confirmInstaxCorners;
+  }
+
+  function mountInstaxCornerEditor(){
+    const out=$("#instaxCornerCanvas"),src=instaxSession.sourceCanvas;if(!out||!src)return;
+    const w=Math.min(920,src.width),sc=w/src.width;out.width=w;out.height=Math.round(src.height*sc);const ctx=out.getContext("2d");
+    const draw=()=>{
+      ctx.drawImage(src,0,0,out.width,out.height);
+      const p=instaxSession.corners.map(q=>({x:q.x*sc,y:q.y*sc}));
+      ctx.fillStyle="rgba(0,0,0,.35)";ctx.fillRect(0,0,out.width,out.height);
+      ctx.save();ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);for(let i=1;i<4;i++)ctx.lineTo(p[i].x,p[i].y);ctx.closePath();ctx.clip();ctx.drawImage(src,0,0,out.width,out.height);ctx.restore();
+      ctx.strokeStyle="#3ee789";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);for(let i=1;i<4;i++)ctx.lineTo(p[i].x,p[i].y);ctx.closePath();ctx.stroke();
+      p.forEach((q,i)=>{ctx.beginPath();ctx.arc(q.x,q.y,14,0,Math.PI*2);ctx.fillStyle="#8b5cf6";ctx.fill();ctx.lineWidth=3;ctx.strokeStyle="#fff";ctx.stroke();ctx.fillStyle="#fff";ctx.font="bold 11px system-ui";ctx.fillText(String(i+1),q.x-3,q.y+4)});
+    };draw();
+    const pos=e=>{const r=out.getBoundingClientRect();return{x:(e.clientX-r.left)*(out.width/r.width),y:(e.clientY-r.top)*(out.height/r.height)}};
+    out.onpointerdown=e=>{const p=pos(e),pts=instaxSession.corners.map(q=>({x:q.x*sc,y:q.y*sc}));let bi=-1,bd=999;pts.forEach((q,i)=>{const d=dist(p,q);if(d<bd){bd=d;bi=i}});if(bd<52){instaxSession.dragIndex=bi;out.setPointerCapture(e.pointerId)}};
+    out.onpointermove=e=>{if(instaxSession.dragIndex<0)return;const p=pos(e);instaxSession.corners[instaxSession.dragIndex]={x:clamp(p.x/sc,0,src.width),y:clamp(p.y/sc,0,src.height)};draw()};
+    out.onpointerup=()=>instaxSession.dragIndex=-1;out.onpointercancel=()=>instaxSession.dragIndex=-1;
+  }
+
+  async function confirmInstaxCorners(){
+    try{
+      toast("台形を補正しています…");
+      const base=await ChekiScanner.crop(instaxSession.sourceCanvas,instaxSession.corners,{format:instaxSession.filmSize,maxLongEdge:1900});
+      instaxSession.baseCanvas=base;instaxSession.edit=ChekiScanner.autoEdit(base);instaxSession.quality=ChekiScanner.quality(base,instaxSession.detection?.confidence||0);
+      instaxSession.phase="edit";renderInstaxEdit();
+    }catch(e){console.error(e);alert("補正に失敗しました。四隅を確認してください。")}
+  }
+
+  function renderInstaxEdit(){
+    const q=instaxSession.quality||ChekiScanner.quality(instaxSession.baseCanvas||instaxSession.sourceCanvas,1);
+    main.innerHTML=`
+      <section class="scan-progress"><span class="done">1 撮影</span><span class="done">2 四隅</span><span class="active">3 画質</span><span>4 保存</span></section>
+      <section class="card">
+        <div class="row"><div><b>画質を整える</b><div class="muted small">${reflectionLabel()}</div></div><span class="scan-score ${q.score>=70?"good":q.score>=50?"warn":"bad"}">${q.score}</span></div>
+        <div class="instax-edit-preview"><canvas id="instaxEditCanvas"></canvas></div>
+        <button class="btn secondary full" id="instaxAutoEdit">AUTO 補正</button>
+        <div class="edit-sliders">
+          ${editSlider("brightness","明るさ",-40,40)}
+          ${editSlider("contrast","コントラスト",-40,40)}
+          ${editSlider("saturation","彩度",-40,40)}
+          ${editSlider("warmth","色温度",-40,40)}
+        </div>
+        <div class="scan-quality-note">${q.warnings.length?safe(q.warnings.join(" / ")):"画質は良好です"}</div>
+        <div class="grid two"><button class="btn secondary" id="backToCorners">${instaxSession.reflectionRemoval?"最初からやり直す":"四隅へ戻る"}</button><button class="btn" id="toInstaxMeta">次へ</button></div>
+      </section>`;
+    updateInstaxEditPreview();
+    $$("[data-edit]").forEach(el=>el.oninput=()=>{instaxSession.edit[el.dataset.edit]=Number(el.value);el.closest(".edit-slider").querySelector("output").textContent=(Number(el.value)>0?"+":"")+el.value;updateInstaxEditPreview()});
+    $("#instaxAutoEdit").onclick=()=>{instaxSession.edit=ChekiScanner.autoEdit(instaxSession.baseCanvas);renderInstaxEdit()};
+    $("#backToCorners").onclick=()=>{if(instaxSession.reflectionRemoval){resetInstaxSession(true);renderInstaxScan()}else{instaxSession.phase="adjust";renderInstaxAdjust()}};
+    $("#toInstaxMeta").onclick=()=>{instaxSession.finalCanvas=ChekiScanner.applyAdjustments(instaxSession.baseCanvas,instaxSession.edit);instaxSession.phase="meta";renderInstaxMeta()};
+  }
+
+  function editSlider(key,label,min,max){
+    const v=Number(instaxSession.edit[key]||0);
+    return `<label class="edit-slider"><div><span>${label}</span><output>${v>0?"+":""}${v}</output></div><input type="range" min="${min}" max="${max}" value="${v}" data-edit="${key}"></label>`;
+  }
+
+  function updateInstaxEditPreview(){
+    const c=$("#instaxEditCanvas");if(!c||!instaxSession.baseCanvas)return;
+    const src=ChekiScanner.applyAdjustments(instaxSession.baseCanvas,instaxSession.edit),max=900,sc=Math.min(1,max/Math.max(src.width,src.height));
+    c.width=Math.round(src.width*sc);c.height=Math.round(src.height*sc);c.getContext("2d").drawImage(src,0,0,c.width,c.height);
+  }
+
+  function renderInstaxMeta(){
+    const d=state.settings.scanDefaults||{},active=currentFieldLive(),selectedLive=d.liveId||active?.id||"";
+    const q=ChekiScanner.quality(instaxSession.finalCanvas||instaxSession.baseCanvas,1);
+    main.innerHTML=`
+      <section class="scan-progress"><span class="done">1 撮影</span><span class="done">2 四隅</span><span class="done">3 画質</span><span class="active">4 保存</span></section>
+      <section class="card">
+        <div class="save-preview-row"><canvas id="instaxSavePreview"></canvas><div><b>${safe(ChekiScanner.formatInfo(instaxSession.filmSize).label)}</b><span class="pill green">${q.score}/100</span><small>${instaxSession.reflectionRemoval?"反射低減済み":"通常スキャン"}</small></div></div>
+        <form id="instaxMetaForm" class="form" style="margin-top:14px">
+          <div class="form-grid">
+            <div class="field"><label>メンバー *</label><select name="memberId" required>${memberOptions(d.memberId)}</select></div>
+            <div class="field"><label>イベント</label><select name="liveId">${liveOptions(selectedLive)}</select></div>
+            <div class="field"><label>撮影日</label><input type="date" name="date" value="${safe(d.date||todayStr())}"></div>
+            <div class="field"><label>種類</label><select name="type">${["2ショット","ソロ","サインあり","サインなし","その他"].map(x=>`<option ${x===(d.type||"2ショット")?"selected":""}>${x}</option>`).join("")}</select></div>
+            <label class="check-row"><input type="checkbox" name="signed" ${d.signed?"checked":""}> サインあり</label>
+            <label class="check-row"><input type="checkbox" name="favorite"> お気に入り</label>
+            <div class="field wide"><label>メモ</label><textarea name="memo" placeholder="ポーズ・衣装・会話など"></textarea></div>
+          </div>
+          <div class="grid two"><button type="button" class="btn secondary" id="backToEdit">画質調整へ戻る</button><button type="submit" class="btn">チェキを保存</button></div>
+        </form>
+      </section>`;
+    const p=$("#instaxSavePreview"),src=instaxSession.finalCanvas||instaxSession.baseCanvas,sc=Math.min(1,280/Math.max(src.width,src.height));p.width=Math.round(src.width*sc);p.height=Math.round(src.height*sc);p.getContext("2d").drawImage(src,0,0,p.width,p.height);
+    $("#backToEdit").onclick=()=>{instaxSession.phase="edit";renderInstaxEdit()};
+    $("#instaxMetaForm").onsubmit=e=>{e.preventDefault();saveInstaxScan(e.currentTarget)};
+  }
+
+  async function saveInstaxScan(form){
+    const memberId=formValue(form,"memberId");if(!memberId){toast("メンバーを選択してください");return}
+    try{
+      const canvas=instaxSession.finalCanvas||ChekiScanner.applyAdjustments(instaxSession.baseCanvas,instaxSession.edit);
+      const blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error("JPEG変換失敗")),"image/jpeg",.94));
+      const thumb=await makeThumbnail(blob),id=uid("img"),q=ChekiScanner.quality(canvas,1);
+      const meta={
+        id,memberId,liveId:formValue(form,"liveId"),date:formValue(form,"date")||todayStr(),type:formValue(form,"type"),
+        signed:checked(form,"signed"),favorite:checked(form,"favorite"),memo:formValue(form,"memo"),
+        chekiNo:nextChekiNo(memberId),createdAt:new Date().toISOString(),
+        scanEngine:"Cheki Scan 2.0",scanConfidence:instaxSession.detection?.confidence||1,scanQuality:q.score,
+        filmSize:instaxSession.filmSize,reflectionRemoval:instaxSession.reflectionRemoval,
+        edit:{...instaxSession.edit}
+      };
+      await mediaPut(id,blob,thumb);state.chekiImages.push(meta);
+      state.settings.scanDefaults={...state.settings.scanDefaults,memberId:meta.memberId,liveId:meta.liveId,date:meta.date,type:meta.type,signed:meta.signed,favorite:false,filmSize:instaxSession.filmSize,reflectionRemoval:instaxSession.reflectionRemoval};
+      save();toast("チェキを保存しました");
+      resetInstaxSession(true);setRoute("album");
+    }catch(e){console.error(e);alert("保存に失敗しました。")}
   }
 
   function renderScan(){
