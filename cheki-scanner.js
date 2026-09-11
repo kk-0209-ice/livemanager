@@ -8,6 +8,8 @@ const FORMATS={
   wide:{key:"wide",label:"WIDE",w:108,h:86}
 };
 let cvPromise=null;
+let jscanifyPromise=null;
+const JSCANIFY_URL="https://cdn.jsdelivr.net/gh/ColonelParrot/jscanify@1.4.0/src/jscanify.js";
 
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
@@ -71,6 +73,71 @@ async function loadOpenCV(timeout=18000){
   }catch(e){cvPromise=null;throw e}
 }
 
+
+async function loadJscanify(timeout=12000){
+  await loadOpenCV(timeout);
+  if(window.jscanify)return window.jscanify;
+  if(jscanifyPromise)return jscanifyPromise;
+  jscanifyPromise=new Promise((resolve,reject)=>{
+    const done=()=>{
+      if(window.jscanify)resolve(window.jscanify);
+      else reject(new Error("jscanify runtime not ready"));
+    };
+    const existing=document.querySelector("script[data-jscanify]");
+    if(existing){
+      existing.addEventListener("load",done,{once:true});
+      existing.addEventListener("error",()=>reject(new Error("jscanify load failed")),{once:true});
+      if(window.jscanify)done();
+      return;
+    }
+    const script=document.createElement("script");
+    script.src=JSCANIFY_URL;script.async=true;script.dataset.jscanify="1";
+    script.onload=done;script.onerror=()=>reject(new Error("jscanify load failed"));
+    document.head.appendChild(script);
+  });
+  try{
+    return await Promise.race([
+      jscanifyPromise,
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error("jscanify timeout")),timeout))
+    ]);
+  }catch(e){jscanifyPromise=null;throw e}
+}
+
+async function prepare(){
+  const results=await Promise.allSettled([loadOpenCV(),loadJscanify()]);
+  return results.some(x=>x.status==="fulfilled");
+}
+
+async function detectCornersJscanify(canvas,{format="mini"}={}){
+  const cv=await loadOpenCV(),J=await loadJscanify();
+  const scanner=new J();
+  let mat=null,contour=null;
+  try{
+    mat=cv.imread(canvas);
+    contour=scanner.findPaperContour(mat);
+    if(!contour||contour.empty?.())throw new Error("paper contour not found");
+    const cp=scanner.getCornerPoints(contour);
+    if(!cp)throw new Error("corner points not found");
+    const pts=orderCorners([
+      cp.topLeftCorner,cp.topRightCorner,cp.bottomRightCorner,cp.bottomLeftCorner
+    ]);
+    if(pts.some(p=>!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)))throw new Error("invalid corner points");
+    const m=quadMetrics(pts,canvas.width,canvas.height,format);
+    if(m.score<.28)throw new Error("weak paper candidate");
+    return {
+      corners:pts,
+      confidence:clamp((m.score-.28)/.58,0,1),
+      rawScore:m.score,
+      engine:"Document AI Scan",
+      format:m.format||format,
+      method:"jscanify",
+      metrics:m
+    };
+  }finally{
+    contour?.delete?.();mat?.delete?.();
+  }
+}
+
 function polygonArea(p){
   return Math.abs(p.reduce((s,q,i)=>s+q.x*p[(i+1)%p.length].y-q.y*p[(i+1)%p.length].x,0))/2;
 }
@@ -92,22 +159,30 @@ function parallelScore(p){
   return (cos(a1,a2)+cos(b1,b2))/2;
 }
 function quadMetrics(p,w,h,format){
+  if(format==="auto"){
+    let best=null;
+    for(const key of Object.keys(FORMATS)){
+      const m=quadMetrics(p,w,h,key);
+      if(!best||m.score>best.score)best={...m,format:key};
+    }
+    return best||{score:-1,format:"mini"};
+  }
   p=orderCorners(p);
   const top=dist(p[0],p[1]),bottom=dist(p[3],p[2]),left=dist(p[0],p[3]),right=dist(p[1],p[2]);
   const qw=(top+bottom)/2,qh=(left+right)/2;
   const major=Math.max(qw,qh),minor=Math.min(qw,qh);
-  if(minor<12)return {score:-1};
+  if(minor<12)return {score:-1,format};
   const observed=major/minor,target=formatLongRatio(format);
-  const ratioScore=Math.exp(-Math.abs(Math.log(observed/target))*3.2);
+  const ratioScore=Math.exp(-Math.abs(Math.log(observed/target))*3.35);
   const ar=polygonArea(p)/(w*h);
-  const areaScore=ar<.04?0:ar<.12?ar/.12:ar>.94?Math.max(0,(1-ar)/.06):Math.min(1,.55+ar);
-  const centerX=p.reduce((s,q)=>s+q.x,0)/4,centerY=p.reduce((s,q)=>s+q.y,0)/4;
+  const areaScore=ar<.04?0:ar<.10?ar/.10:ar>.96?Math.max(0,(1-ar)/.04):Math.min(1,.58+ar);
+  const centerX=p.reduce((sum,q)=>sum+q.x,0)/4,centerY=p.reduce((sum,q)=>sum+q.y,0)/4;
   const centerDist=Math.hypot((centerX-w/2)/(w/2),(centerY-h/2)/(h/2));
-  const centerScore=1-clamp(centerDist*.55,0,.8);
+  const centerScore=1-clamp(centerDist*.48,0,.78);
   const rect=angleRectScore(p),parallel=parallelScore(p);
   const edgeBalance=Math.min(top,bottom)/Math.max(top,bottom)*Math.min(left,right)/Math.max(left,right);
-  const score=ratioScore*.38+rect*.20+parallel*.12+edgeBalance*.12+areaScore*.12+centerScore*.06;
-  return {score,ratioScore,rect,parallel,edgeBalance,areaRatio:ar,centerScore};
+  const score=ratioScore*.36+rect*.21+parallel*.14+edgeBalance*.12+areaScore*.11+centerScore*.06;
+  return {score,ratioScore,rect,parallel,edgeBalance,areaRatio:ar,centerScore,format};
 }
 
 function sampleBorderWhiteness(canvas,p){
@@ -218,7 +293,7 @@ async function detectCornersOpenCV(canvas,{format="mini"}={}){
       confidence:conf,
       rawScore:best.score,
       engine:"Instax輪郭検出",
-      format,
+      format:best.metrics?.format||format,
       method:best.tag,
       metrics:best.metrics
     };
@@ -233,14 +308,21 @@ function detectCornersFallback(canvas,{format="mini"}={}){
 }
 
 async function detectCorners(canvas,opts={}){
-  try{return await detectCornersOpenCV(canvas,opts)}
-  catch(e){
-    console.warn("[ChekiScanner] detector fallback",e);
-    return detectCornersFallback(canvas,opts);
+  const candidates=[];
+  try{candidates.push(await detectCornersJscanify(canvas,opts))}catch(e){console.warn("[ChekiScanner] jscanify:",e?.message||e)}
+  // Strong document contour: return immediately to keep live scan fast.
+  if(candidates[0]?.confidence>=.62)return candidates[0];
+  try{candidates.push(await detectCornersOpenCV(canvas,opts))}catch(e){console.warn("[ChekiScanner] OpenCV ensemble:",e?.message||e)}
+  const valid=candidates.filter(x=>x?.corners?.length===4);
+  if(valid.length){
+    valid.sort((a,b)=>(b.confidence||0)-(a.confidence||0));
+    return valid[0];
   }
+  return detectCornersFallback(canvas,opts);
 }
 
 function computeOutputSize(corners,format="mini",maxLongEdge=1800){
+  if(format==="auto")format="mini";
   const p=orderCorners(corners),f=formatInfo(format);
   const observedW=(dist(p[0],p[1])+dist(p[3],p[2]))/2;
   const observedH=(dist(p[0],p[3])+dist(p[1],p[2]))/2;
@@ -305,6 +387,57 @@ function cropFallback(canvas,corners,{format="mini",maxLongEdge=1100}={}){
 async function crop(canvas,corners,opts={}){
   try{return await cropOpenCV(canvas,corners,opts)}
   catch(e){console.warn("[ChekiScanner] warp fallback",e);return cropFallback(canvas,corners,opts)}
+}
+
+
+async function detectRegions(canvas,{format="auto"}={}){
+  const cv=await loadOpenCV();
+  let src=null,small=null,gray=null,blur=null,edges=null,closed=null,kernel=null,contours=null,hierarchy=null;
+  try{
+    src=cv.imread(canvas);
+    const scale=Math.min(1,1100/Math.max(src.cols,src.rows));
+    small=new cv.Mat();
+    cv.resize(src,small,new cv.Size(Math.round(src.cols*scale),Math.round(src.rows*scale)),0,0,cv.INTER_AREA);
+    gray=new cv.Mat();blur=new cv.Mat();edges=new cv.Mat();closed=new cv.Mat();
+    cv.cvtColor(small,gray,cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray,blur,new cv.Size(5,5),0,0,cv.BORDER_DEFAULT);
+    cv.Canny(blur,edges,30,120,3,false);
+    kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(5,5));
+    cv.morphologyEx(edges,closed,cv.MORPH_CLOSE,kernel,new cv.Point(-1,-1),2);
+    contours=new cv.MatVector();hierarchy=new cv.Mat();
+    cv.findContours(closed,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+    const found=[];
+    for(let i=0;i<contours.size();i++){
+      const cnt=contours.get(i);let hull=null,approx=null;
+      try{
+        const area=Math.abs(cv.contourArea(cnt,false)),ar=area/(small.cols*small.rows);
+        if(ar<.012||ar>.70)continue;
+        hull=new cv.Mat();cv.convexHull(cnt,hull,false,true);
+        const peri=cv.arcLength(hull,true);
+        for(const eps of [.015,.022,.03,.04]){
+          approx?.delete();approx=new cv.Mat();cv.approxPolyDP(hull,approx,eps*peri,true);
+          if(approx.rows!==4||!cv.isContourConvex(approx))continue;
+          const pts=[];for(let r=0;r<4;r++){const v=approx.intPtr(r,0);pts.push({x:v[0],y:v[1]})}
+          const p=orderCorners(pts),m=quadMetrics(p,small.cols,small.rows,format);
+          if(m.score<.43)continue;
+          const inv=1/scale,corners=p.map(q=>({x:q.x*inv,y:q.y*inv}));
+          const xs=corners.map(q=>q.x),ys=corners.map(q=>q.y);
+          found.push({corners,x:Math.min(...xs),y:Math.min(...ys),w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys),confidence:clamp((m.score-.3)/.6,0,1),format:m.format});
+          break;
+        }
+      }finally{cnt.delete();hull?.delete();approx?.delete()}
+    }
+    found.sort((a,b)=>b.confidence-a.confidence);
+    const iou=(a,b)=>{
+      const x1=Math.max(a.x,b.x),y1=Math.max(a.y,b.y),x2=Math.min(a.x+a.w,b.x+b.w),y2=Math.min(a.y+a.h,b.y+b.h);
+      const inter=Math.max(0,x2-x1)*Math.max(0,y2-y1);return inter/(a.w*a.h+b.w*b.h-inter||1);
+    };
+    const kept=[];
+    for(const r of found){if(kept.every(k=>iou(r,k)<.42))kept.push(r);if(kept.length>=30)break}
+    return kept.sort((a,b)=>a.y-b.y||a.x-b.x);
+  }finally{
+    [src,small,gray,blur,edges,closed,kernel,hierarchy].forEach(x=>x?.delete?.());contours?.delete?.();
+  }
 }
 
 function imageStats(canvas){
@@ -394,7 +527,7 @@ function combineGlareFrames(frames){
 }
 
 window.ChekiScanner={
-  FORMATS,formatInfo,formatLongRatio,loadOpenCV,detectCorners,crop,defaultCorners,orderCorners,
-  autoEdit,applyAdjustments,quality,imageStats,combineGlareFrames,OPENCV_URL
+  FORMATS,formatInfo,formatLongRatio,loadOpenCV,loadJscanify,prepare,detectCorners,detectRegions,crop,defaultCorners,orderCorners,
+  autoEdit,applyAdjustments,quality,imageStats,combineGlareFrames,OPENCV_URL,JSCANIFY_URL
 };
 })();

@@ -1,12 +1,12 @@
 {
-  "name": "Live Manager v6.0",
+  "name": "Live Manager v7.0",
   "short_name": "Live Manager",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0d0f14",
   "theme_color": "#111318",
   "lang": "ja",
-  "description": "ライブ管理 + instaxプリント向けライブカメラスキャン・反射低減・チェキ管理PWA",
+  "description": "ライブ管理 + 動画リファレンス型チェキスキャン・緑枠ロック・自動歪み補正",
   "icons": [
     {
       "src": "./icon.svg",
