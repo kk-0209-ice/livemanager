@@ -31,9 +31,9 @@
   let route = "home";
   let params = {};
   let calendarCursor = new Date();
-  let scanSession = { sourceCanvas:null, corners:null, dragIndex:-1, lastMeta:null };
+  let scanSession = { sourceCanvas:null, corners:null, dragIndex:-1, lastMeta:null, detection:null, tone:"natural", ratioMode:"cheki", rotation:0, quality:null, previewCanvas:null };
   let batchSession = { sourceCanvas:null, regions:[], selected:new Set() };
-  let albumFilter = { memberId:"", liveId:"", month:"", signed:"", favorite:"" };
+  let albumFilter = { memberId:"", liveId:"", month:"", signed:"", favorite:"", q:"", sort:"newest" };
 
   const $ = (s, el=document) => el.querySelector(s);
   const $$ = (s, el=document) => [...el.querySelectorAll(s)];
@@ -113,6 +113,7 @@
     else if(route==="live-detail") renderLiveDetail(params.id);
     else if(route==="calendar") renderCalendar();
     else if(route==="cheki") renderChekiToday();
+    else if(route==="cheki-hub") renderChekiHub();
     else if(route==="groups") renderGroups();
     else if(route==="members") renderMembers();
     else if(route==="expenses") renderExpenses();
@@ -121,6 +122,7 @@
     else if(route==="field") renderFieldMode();
     else if(route==="scan") renderScan();
     else if(route==="album") renderAlbum();
+    else if(route==="cheki-storage") renderChekiStorage();
     else if(route==="cheki-tickets") renderChekiTickets();
     else if(route==="import-url") renderUrlImport();
     else if(route==="seat-map") renderSeatMap();
@@ -206,7 +208,7 @@
       <div class="section-title"><h2>クイック操作</h2></div>
       <section class="quick-grid">
         <button data-go="field"><span>⚡</span>現場モード</button>
-        <button data-go="cheki"><span>📸</span>今日のチェキ</button>
+        <button data-go="cheki-hub"><span>📸</span>チェキ管理</button>
         <button data-go="scan"><span>▣</span>チェキスキャン</button>
         <button data-go="batch-scan"><span>▦</span>一括スキャン</button>
         <button data-go="import-url"><span>🔗</span>URL取込</button>
@@ -549,9 +551,10 @@
     main.innerHTML=`
       <section class="card stack">
         ${moreLink("⚡","現場モード","field")}
-        ${moreLink("📸","今日のチェキ","cheki")}
+        ${moreLink("📸","チェキ管理","cheki-hub")}
         ${moreLink("▣","チェキスキャン","scan")}
         ${moreLink("🖼️","チェキアルバム","album")}
+        ${moreLink("💾","チェキ保存・ストレージ","cheki-storage")}
         ${moreLink("🎟️","チェキ券・特典券","cheki-tickets")}
         ${moreLink("🔗","ライブURL取り込み","import-url")}
         ${moreLink("🪑","座席マップ","seat-map")}
@@ -572,7 +575,7 @@
         <button class="btn danger full" data-action="reset">全データを削除</button>
       </section>
       <div class="section-title"><h2>このバージョン</h2></div>
-      <section class="card"><b>Live Manager v4.3</b><p class="muted small" style="margin:8px 0 0">TicketDive自動連携 / URL取り込み / Googleカレンダー / 座席マップ / 一括スキャン / AI連携口 / Supabaseクラウド同期</p></section>`;
+      <section class="card"><b>Live Manager v5.0</b><p class="muted small" style="margin:8px 0 0">Cheki Studio / 高精度スキャン / チェキ管理・保存 / TicketDive自動連携 / クラウド同期</p></section>`;
     bindActions();
   }
 
@@ -629,7 +632,7 @@
   function openQuickAdd(){
     openModal("クイック追加",`<div class="quick-grid">
       <button data-q="live"><span>🎫</span>ライブ</button>
-      <button data-q="cheki"><span>📸</span>今日のチェキ</button>
+      <button data-q="cheki"><span>📸</span>チェキ管理</button>
       <button data-q="scan"><span>▣</span>チェキスキャン</button>
       <button data-q="batch"><span>▦</span>一括スキャン</button>
       <button data-q="url"><span>🔗</span>URL取込</button>
@@ -640,7 +643,7 @@
       $$("[data-q]",modalBody).forEach(b=>b.onclick=()=>{
         const q=b.dataset.q; closeModal();
         if(q==="live")openLiveForm();
-        if(q==="cheki")setRoute("cheki");
+        if(q==="cheki")setRoute("cheki-hub");
         if(q==="scan")setRoute("scan");
         if(q==="batch")setRoute("batch-scan");
         if(q==="url")setRoute("import-url");
@@ -883,6 +886,108 @@
 
   function memberOptions(selected=""){ return `<option value="">メンバーを選択</option>`+state.members.map(m=>`<option value="${m.id}" ${m.id===selected?"selected":""}>${safe(m.name)}${groupById(m.groupId)?` / ${safe(groupById(m.groupId).name)}`:""}</option>`).join(""); }
 
+
+  function renderChekiHub(){
+    pageTitle("チェキ");
+    const totalSaved=state.chekiImages.length;
+    const todaySaved=state.chekiImages.filter(x=>x.date===todayStr()).length;
+    const totalShot=totalCheki();
+    const unscanned=Math.max(0,totalShot-totalSaved);
+    const favorites=state.chekiImages.filter(x=>x.favorite).length;
+    const recent=[...state.chekiImages].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).slice(0,6);
+    main.innerHTML=`
+      <section class="card hero cheki-studio-hero">
+        <div class="kicker">CHEKI STUDIO</div>
+        <h2>撮る・整える・残すをひとつに</h2>
+        <p class="muted">チェキのスキャン、台形補正、管理、アルバム、端末保存までまとめて使えます。</p>
+        <div class="grid two" style="margin-top:16px">
+          <button class="btn" data-go="scan">▣ 1枚スキャン</button>
+          <button class="btn secondary" data-go="batch-scan">▦ 一括スキャン</button>
+        </div>
+      </section>
+      <section class="grid two desktop-4" style="margin-top:12px">
+        ${metric("保存済み",totalSaved,"枚")}
+        ${metric("今日の保存",todaySaved,"枚")}
+        ${metric("未スキャン目安",unscanned,"枚")}
+        ${metric("お気に入り",favorites,"枚")}
+      </section>
+      <div class="section-title"><h2>チェキメニュー</h2></div>
+      <section class="cheki-menu-grid">
+        <button data-go="scan"><span>▣</span><b>チェキスキャン</b><small>自動四隅検出・台形補正</small></button>
+        <button data-go="album"><span>🖼️</span><b>チェキ管理</b><small>検索・編集・端末保存</small></button>
+        <button data-go="cheki"><span>＋</span><b>枚数を記録</b><small>今日誰と何枚撮ったか</small></button>
+        <button data-go="batch-scan"><span>▦</span><b>一括スキャン</b><small>複数枚を自動切り分け</small></button>
+        <button data-go="cheki-tickets"><span>🎟️</span><b>チェキ券</b><small>購入・使用・残数管理</small></button>
+        <button data-go="cheki-storage"><span>💾</span><b>保存とバックアップ</b><small>容量確認・データ保護</small></button>
+      </section>
+      <div class="section-title"><h2>最近保存したチェキ</h2><button class="btn small secondary" data-go="album">すべて見る</button></div>
+      ${recent.length?`<section class="album-grid hub-album">${recent.map(x=>`<button class="album-item" data-image-detail="${x.id}"><div class="album-photo"><img data-hub-thumb="${x.id}" alt="チェキ"><span class="album-no">#${String(x.chekiNo||0).padStart(4,"0")}</span>${x.favorite?'<span class="album-fav">★</span>':""}</div><div class="album-caption"><b>${safe(memberById(x.memberId)?.name||"未設定")}</b><span>${safe(x.date||"")}</span></div></button>`).join("")}</section>`:`<section class="card empty"><div class="emoji">📸</div><b>まだ保存したチェキがありません</b><p>「チェキスキャン」から最初の1枚を保存できます。</p></section>`}
+      <section class="notice" style="margin-top:14px">撮影枚数と保存画像数は別管理です。撮影枚数は「枚数を記録」、画像は「チェキスキャン」で保存します。</section>`;
+    $$('[data-image-detail]').forEach(b=>b.onclick=()=>openChekiImageDetail(b.dataset.imageDetail));
+    loadHubThumbs();
+    bindRouteLinks();
+  }
+
+  async function loadHubThumbs(){
+    for(const img of $$("[data-hub-thumb]")){
+      try{
+        const rec=await mediaGet(img.dataset.hubThumb);if(!rec)continue;
+        const u=URL.createObjectURL(rec.thumb||rec.blob);img.onload=()=>URL.revokeObjectURL(u);img.src=u;
+      }catch(e){}
+    }
+  }
+
+  function formatBytes(n){
+    n=Number(n||0);if(n<1024)return `${n} B`;if(n<1024**2)return `${(n/1024).toFixed(1)} KB`;
+    if(n<1024**3)return `${(n/1024**2).toFixed(1)} MB`;return `${(n/1024**3).toFixed(2)} GB`;
+  }
+
+  async function renderChekiStorage(){
+    pageTitle("チェキ保存");
+    main.innerHTML=`
+      <section class="card hero"><div class="kicker">CHEKI STORAGE</div><h2>大切なチェキを守る</h2><p class="muted">画像はこの端末のブラウザ内ストレージに保存されます。バックアップも定期的に作成してください。</p></section>
+      <section class="grid two" style="margin-top:12px">
+        ${metric("保存画像",state.chekiImages.length,"枚")}
+        <article class="metric"><div class="label">使用容量</div><div class="value" id="chekiStorageUsed">計算中</div><div class="suffix" id="chekiStorageQuota"></div></article>
+      </section>
+      <section class="card stack" style="margin-top:12px">
+        <div class="row"><div><b>端末保存を保護</b><div class="muted small" id="persistStatus">状態を確認中…</div></div><button class="btn small secondary" id="requestPersist">保持をリクエスト</button></div>
+        <div class="divider"></div>
+        <button class="btn secondary full" data-action="export">画像込みバックアップを書き出す</button>
+        <button class="btn secondary full" data-action="import">バックアップを読み込む</button>
+        <button class="btn secondary full" id="downloadAllGuide">端末への画像保存について</button>
+      </section>
+      <section class="warning" style="margin-top:12px">ブラウザの「サイトデータを削除」を行うと、端末内のチェキ画像も消える可能性があります。公開アプリとして使う場合はバックアップまたはクラウド同期を推奨します。</section>`;
+    bindActions();
+    try{
+      if(navigator.storage?.estimate){
+        const e=await navigator.storage.estimate();
+        $("#chekiStorageUsed").textContent=formatBytes(e.usage||0);
+        $("#chekiStorageQuota").textContent=e.quota?` / ${formatBytes(e.quota)}`:"";
+      }
+      const persisted=navigator.storage?.persisted?await navigator.storage.persisted():false;
+      $("#persistStatus").textContent=persisted?"この端末で永続保存が許可されています":"ブラウザ判断で削除される可能性があります";
+    }catch(e){$("#persistStatus").textContent="保存状態を取得できませんでした"}
+    $("#requestPersist").onclick=async()=>{
+      if(!navigator.storage?.persist){toast("このブラウザは永続保存リクエストに対応していません");return}
+      const ok=await navigator.storage.persist();toast(ok?"端末保存が保護されました":"ブラウザにより許可されませんでした");renderChekiStorage();
+    };
+    $("#downloadAllGuide").onclick=()=>openModal("画像を端末へ保存",`<div class="stack"><p>チェキ管理で画像を開き、「画像を端末に保存」を押すとJPEGとして保存できます。</p><button class="btn full" data-go="album">チェキ管理を開く</button></div>`,()=>{modalBody.querySelector("[data-go]").onclick=()=>{closeModal();setRoute("album")}});
+  }
+
+  function scanEngineLabel(){
+    const d=scanSession.detection;
+    if(!d)return "四隅未検出";
+    const pct=Math.round((d.confidence||0)*100);
+    return `${d.engine||"自動検出"} ${pct}%`;
+  }
+
+  function qualityHTML(q){
+    if(!q)return `<div class="muted small">補正プレビューを作成すると品質を診断します。</div>`;
+    const cls=q.score>=85?"quality-good":q.score>=65?"quality-ok":q.score>=45?"quality-warn":"quality-bad";
+    return `<div class="scan-quality ${cls}"><div><span class="quality-score">${q.score}</span><small>/100</small></div><div><b>${safe(q.label)}</b><div class="muted small">${q.warnings.length?safe(q.warnings.join(" / ")):"解像感・明るさとも良好です"}</div></div></div>`;
+  }
+
   function renderScan(){
     pageTitle("チェキスキャン");
     const d=state.settings.scanDefaults||{};
@@ -890,71 +995,120 @@
     const selectedLive=d.liveId||active?.id||"";
     main.innerHTML=`
       <section class="card scan-intro">
-        <div><b>カメラまたは写真から取り込み</b><div class="muted small">白い四隅をドラッグしてチェキの角に合わせ、補正して保存します。</div></div>
+        <div><div class="kicker">SMART SCAN</div><b>チェキをきれいにデジタル保存</b><div class="muted small">高精度の四隅検出 → 台形補正 → 画質補正 → 品質チェック → 保存</div></div>
         <label class="btn scan-file-label">${scanSession.sourceCanvas?"別の写真を選ぶ":"カメラ / 写真を選ぶ"}<input id="scanFile" type="file" accept="image/*" capture="environment" hidden></label>
       </section>
       ${scanSession.sourceCanvas?`
+      <section class="scan-stepper">
+        <span class="active">1 四隅</span><span>2 補正</span><span>3 情報</span><span>4 保存</span>
+      </section>
       <section class="card scanner-card">
-        <div class="row"><b>四隅を調整</b><div class="btn-row"><button class="btn small secondary" id="autoCorners">自動検出</button><button class="btn small secondary" id="resetCorners">リセット</button></div></div>
+        <div class="row"><div><b>① 四隅を確認</b><div class="muted small">${safe(scanEngineLabel())}</div></div><div class="btn-row"><button class="btn small secondary" id="autoCorners">高精度で再検出</button><button class="btn small secondary" id="resetCorners">リセット</button></div></div>
         <canvas id="scanCanvas" class="scan-canvas"></canvas>
-        <div class="notice">丸いハンドルをチェキの四隅へ移動してください。保存時に傾き・台形を補正します。</div>
+        <div class="notice">紫の丸をチェキ外枠の四隅へ合わせてください。自動検出がずれても手動で正確に直せます。</div>
+      </section>
+      <section class="card scan-preview-card" style="margin-top:12px">
+        <div class="row"><div><b>② 補正プレビュー</b><div class="muted small">台形・傾き・明るさを補正</div></div><div class="btn-row"><button class="btn small secondary" id="rotateLeft">↶ 90°</button><button class="btn small secondary" id="rotateRight">↷ 90°</button></div></div>
+        <div class="scan-preview-wrap"><canvas id="scanPreviewCanvas"></canvas><div id="scanPreviewLoading" class="scan-preview-loading">プレビュー作成中…</div></div>
+        <div class="form-grid">
+          <div class="field"><label>画質補正</label><select id="scanTone"><option value="natural" ${scanSession.tone==="natural"?"selected":""}>自然に自動補正</option><option value="original" ${scanSession.tone==="original"?"selected":""}>補正なし</option><option value="bright" ${scanSession.tone==="bright"?"selected":""}>明るめ</option></select></div>
+          <div class="field"><label>出力比率</label><select id="scanRatio"><option value="cheki" ${scanSession.ratioMode==="cheki"?"selected":""}>チェキ比率 54×86</option><option value="free" ${scanSession.ratioMode==="free"?"selected":""}>検出した比率</option></select></div>
+        </div>
+        <button class="btn secondary full" id="refreshPreview" style="margin-top:10px">補正プレビューを更新</button>
+        <div id="scanQualityBox" style="margin-top:10px">${qualityHTML(scanSession.quality)}</div>
       </section>
       <section class="card" style="margin-top:12px">
         <form id="scanMetaForm" class="form">
+          <div class="section-title compact"><h2>③ チェキ情報</h2></div>
           <div class="form-grid">
-            <div class="field"><label>メンバー *</label><select name="memberId" required>${memberOptions(d.memberId)}</select><button type="button" class="btn small secondary" id="suggestMember" style="margin-top:6px">AI/イベント候補</button></div>
+            <div class="field"><label>メンバー *</label><select name="memberId" required>${memberOptions(d.memberId)}</select><button type="button" class="btn small secondary" id="suggestMember" style="margin-top:6px">AI / イベント候補</button></div>
             <div class="field"><label>イベント</label><select name="liveId">${liveOptions(selectedLive)}</select></div>
             <div class="field"><label>撮影日</label><input type="date" name="date" value="${safe(d.date||todayStr())}"></div>
             <div class="field"><label>種類</label><select name="type">${["2ショット","ソロ","サインあり","サインなし","写メ","その他"].map(x=>`<option ${x===(d.type||"2ショット")?"selected":""}>${x}</option>`).join("")}</select></div>
             <label class="check-row"><input type="checkbox" name="signed" ${d.signed?"checked":""}> サインあり</label>
             <label class="check-row"><input type="checkbox" name="favorite" ${d.favorite?"checked":""}> お気に入り</label>
-            <div class="field wide"><label>メモ</label><textarea name="memo"></textarea></div>
+            <div class="field wide"><label>メモ</label><textarea name="memo" placeholder="ポーズ・衣装・会話メモなど"></textarea></div>
           </div>
-          <div class="grid two"><button class="btn" type="submit">保存して完了</button><button class="btn secondary" type="button" id="saveContinue">保存して次をスキャン</button></div>
+          <div class="section-title compact"><h2>④ 保存</h2></div>
+          <div class="grid two"><button class="btn" type="submit">保存して管理画面へ</button><button class="btn secondary" type="button" id="saveContinue">保存して次をスキャン</button></div>
         </form>
       </section>`:`
-      <section class="card empty scan-empty"><div class="emoji">▣</div><b>チェキを撮影・選択してください</b><p>スマホでは「カメラ / 写真を選ぶ」からそのまま撮影できます。</p></section>`}`;
+      <section class="card empty scan-empty"><div class="emoji">▣</div><b>チェキを撮影・選択してください</b><p>机や床とチェキの境界が分かるように撮ると自動検出が安定します。少し斜めでも台形補正できます。</p><div class="scan-tips"><span>✓ 影を減らす</span><span>✓ 全体を入れる</span><span>✓ ピントを合わせる</span></div></section>`}`;
     $("#scanFile").onchange=e=>{ const f=e.target.files?.[0]; if(f)loadScanFile(f); };
-    if(scanSession.sourceCanvas){ mountScannerCanvas(); $("#autoCorners").onclick=()=>{scanSession.corners=autoDetectCorners(scanSession.sourceCanvas);mountScannerCanvas()}; $("#resetCorners").onclick=()=>{scanSession.corners=defaultCorners(scanSession.sourceCanvas);mountScannerCanvas()};
+    if(scanSession.sourceCanvas){
+      mountScannerCanvas();
+      $("#autoCorners").onclick=()=>autoDetectScanCorners(true);
+      $("#resetCorners").onclick=()=>{scanSession.corners=ChekiScanner.defaultCorners(scanSession.sourceCanvas);scanSession.detection={engine:"手動調整",confidence:0};mountScannerCanvas();refreshScanPreview()};
       $("#suggestMember").onclick=()=>suggestMemberForScan($("#scanMetaForm"));
       $("#scanMetaForm").onsubmit=e=>{e.preventDefault();saveScannedCheki(false,e.currentTarget)};
       $("#saveContinue").onclick=()=>saveScannedCheki(true,$("#scanMetaForm"));
+      $("#scanTone").onchange=e=>{scanSession.tone=e.target.value;refreshScanPreview()};
+      $("#scanRatio").onchange=e=>{scanSession.ratioMode=e.target.value;refreshScanPreview()};
+      $("#rotateLeft").onclick=()=>{scanSession.rotation=(scanSession.rotation+270)%360;refreshScanPreview()};
+      $("#rotateRight").onclick=()=>{scanSession.rotation=(scanSession.rotation+90)%360;refreshScanPreview()};
+      $("#refreshPreview").onclick=()=>refreshScanPreview(true);
+      setTimeout(()=>refreshScanPreview(false),30);
     }
   }
 
   async function loadScanFile(file){
     try{
       const bmp=await createImageBitmap(file);
-      const max=2000, scale=Math.min(1,max/Math.max(bmp.width,bmp.height));
-      const c=document.createElement("canvas"); c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);
+      const max=2800, scale=Math.min(1,max/Math.max(bmp.width,bmp.height));
+      const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
       c.getContext("2d").drawImage(bmp,0,0,c.width,c.height); bmp.close?.();
-      scanSession.sourceCanvas=c;scanSession.corners=autoDetectCorners(c);renderScan();
-    }catch(e){alert("画像を読み込めませんでした。別の画像を選択してください。");}
+      scanSession={...scanSession,sourceCanvas:c,corners:ChekiScanner.defaultCorners(c),detection:{engine:"検出準備中",confidence:0},rotation:0,quality:null,previewCanvas:null};
+      renderScan();
+      await autoDetectScanCorners(false);
+    }catch(e){console.error(e);alert("画像を読み込めませんでした。別の画像を選択してください。");}
   }
 
-  function defaultCorners(c){ const mx=c.width*.06,my=c.height*.06;return [{x:mx,y:my},{x:c.width-mx,y:my},{x:c.width-mx,y:c.height-my},{x:mx,y:c.height-my}]; }
-  function autoDetectCorners(c){
+  async function autoDetectScanCorners(showToast=true){
+    if(!scanSession.sourceCanvas)return;
+    if(showToast)toast("高精度で四隅を検出中…");
+    const btn=$("#autoCorners");if(btn){btn.disabled=true;btn.textContent="検出中…"}
     try{
-      const max=260, sc=Math.min(1,max/Math.max(c.width,c.height)), w=Math.max(1,Math.round(c.width*sc)),h=Math.max(1,Math.round(c.height*sc));
-      const t=document.createElement("canvas");t.width=w;t.height=h;t.getContext("2d").drawImage(c,0,0,w,h);const d=t.getContext("2d").getImageData(0,0,w,h).data;
-      let minX=w,minY=h,maxX=0,maxY=0,count=0;
-      for(let y=0;y<h;y+=2)for(let x=0;x<w;x+=2){const i=(y*w+x)*4,r=d[i],g=d[i+1],b=d[i+2],lum=.299*r+.587*g+.114*b,spread=Math.max(r,g,b)-Math.min(r,g,b);if(lum>205&&spread<50){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);count++;}}
-      const area=(maxX-minX)*(maxY-minY)/(w*h); if(count<80||area<.18||area>.92)return defaultCorners(c);
-      const inv=1/sc;return [{x:minX*inv,y:minY*inv},{x:maxX*inv,y:minY*inv},{x:maxX*inv,y:maxY*inv},{x:minX*inv,y:maxY*inv}];
-    }catch(e){return defaultCorners(c)}
+      const result=await ChekiScanner.detectCorners(scanSession.sourceCanvas);
+      scanSession.corners=result.corners;scanSession.detection=result;
+      renderScan();
+      if(showToast)toast(result.confidence>=.55?"四隅を検出しました":"検出結果を確認して四隅を調整してください");
+    }catch(e){console.error(e);toast("自動検出できませんでした。四隅を手動調整してください");}
+    finally{if(btn){btn.disabled=false;btn.textContent="高精度で再検出"}}
   }
 
   function mountScannerCanvas(){
     const out=$("#scanCanvas"); if(!out||!scanSession.sourceCanvas)return; const src=scanSession.sourceCanvas;
     const width=Math.min(900,src.width),scale=width/src.width;out.width=width;out.height=Math.round(src.height*scale);const ctx=out.getContext("2d");
-    const draw=()=>{ctx.clearRect(0,0,out.width,out.height);ctx.drawImage(src,0,0,out.width,out.height);const pts=scanSession.corners.map(p=>({x:p.x*scale,y:p.y*scale}));ctx.lineWidth=3;ctx.strokeStyle="#ffffff";ctx.fillStyle="rgba(139,92,246,.92)";ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<4;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.closePath();ctx.stroke();pts.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,11,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle="#fff";ctx.font="bold 11px system-ui";ctx.fillText(String(i+1),p.x-3,p.y+4);ctx.fillStyle="rgba(139,92,246,.92)";});};draw();
+    const draw=()=>{
+      ctx.clearRect(0,0,out.width,out.height);ctx.drawImage(src,0,0,out.width,out.height);
+      const pts=scanSession.corners.map(p=>({x:p.x*scale,y:p.y*scale}));
+      ctx.fillStyle="rgba(0,0,0,.28)";ctx.fillRect(0,0,out.width,out.height);
+      ctx.save();ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<4;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.closePath();ctx.clip();ctx.drawImage(src,0,0,out.width,out.height);ctx.restore();
+      ctx.lineWidth=3;ctx.strokeStyle="#ffffff";ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<4;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.closePath();ctx.stroke();
+      pts.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,13,0,Math.PI*2);ctx.fillStyle="rgba(139,92,246,.96)";ctx.fill();ctx.lineWidth=3;ctx.strokeStyle="#fff";ctx.stroke();ctx.fillStyle="#fff";ctx.font="bold 11px system-ui";ctx.fillText(String(i+1),p.x-3,p.y+4)});
+    };draw();
     const pos=e=>{const r=out.getBoundingClientRect(),sx=out.width/r.width,sy=out.height/r.height;return{x:(e.clientX-r.left)*sx,y:(e.clientY-r.top)*sy}};
-    out.onpointerdown=e=>{const p=pos(e),pts=scanSession.corners.map(q=>({x:q.x*scale,y:q.y*scale}));let best=-1,dist=999;pts.forEach((q,i)=>{const d=Math.hypot(p.x-q.x,p.y-q.y);if(d<dist){dist=d;best=i}});if(dist<36){scanSession.dragIndex=best;out.setPointerCapture(e.pointerId)}};
-    out.onpointermove=e=>{if(scanSession.dragIndex<0)return;const p=pos(e),i=scanSession.dragIndex;scanSession.corners[i]={x:Math.max(0,Math.min(src.width,p.x/scale)),y:Math.max(0,Math.min(src.height,p.y/scale))};draw()};
-    out.onpointerup=()=>scanSession.dragIndex=-1;out.onpointercancel=()=>scanSession.dragIndex=-1;
+    out.onpointerdown=e=>{const p=pos(e),pts=scanSession.corners.map(q=>({x:q.x*scale,y:q.y*scale}));let best=-1,dd=999;pts.forEach((q,i)=>{const d=Math.hypot(p.x-q.x,p.y-q.y);if(d<dd){dd=d;best=i}});if(dd<44){scanSession.dragIndex=best;out.setPointerCapture(e.pointerId)}};
+    out.onpointermove=e=>{if(scanSession.dragIndex<0)return;const p=pos(e),i=scanSession.dragIndex;scanSession.corners[i]={x:Math.max(0,Math.min(src.width,p.x/scale)),y:Math.max(0,Math.min(src.height,p.y/scale))};scanSession.detection={engine:"手動調整",confidence:1};draw()};
+    out.onpointerup=()=>{if(scanSession.dragIndex>=0){scanSession.dragIndex=-1;refreshScanPreview()}};
+    out.onpointercancel=()=>scanSession.dragIndex=-1;
   }
 
-  function quadDistance(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+  async function refreshScanPreview(showToast=false){
+    if(!scanSession.sourceCanvas||!scanSession.corners)return;
+    const canvas=$("#scanPreviewCanvas"),loading=$("#scanPreviewLoading"),box=$("#scanQualityBox");
+    if(!canvas)return;
+    if(loading)loading.style.display="grid";
+    try{
+      const out=await ChekiScanner.crop(scanSession.sourceCanvas,scanSession.corners,{tone:scanSession.tone,ratioMode:scanSession.ratioMode,rotation:scanSession.rotation,maxLongEdge:760});
+      scanSession.previewCanvas=out;
+      scanSession.quality=ChekiScanner.quality(out,scanSession.detection?.confidence||0);
+      canvas.width=out.width;canvas.height=out.height;canvas.getContext("2d").drawImage(out,0,0);
+      if(box)box.innerHTML=qualityHTML(scanSession.quality);
+      if(showToast)toast("補正プレビューを更新しました");
+    }catch(e){console.error(e);if(box)box.innerHTML=`<div class="warning">プレビューを作成できませんでした。四隅を確認してください。</div>`}
+    finally{if(loading)loading.style.display="none"}
+  }
 
   async function suggestMemberForScan(form){
     const liveId=formValue(form,"liveId"),live=liveById(liveId),eligible=state.members.filter(m=>!live?.groupId||m.groupId===live.groupId);
@@ -964,14 +1118,10 @@
     const last=state.settings.scanDefaults.memberId,c=candidates.find(m=>m.id===last)||candidates[0];form.elements.memberId.value=c.id;toast(`イベント候補：${c.name}`);
   }
 
-  async function cropScannerBlob(){
-    const src=scanSession.sourceCanvas,p=scanSession.corners;if(!src||!p)throw new Error("no scan");
-    let w=Math.round((quadDistance(p[0],p[1])+quadDistance(p[3],p[2]))/2),h=Math.round((quadDistance(p[0],p[3])+quadDistance(p[1],p[2]))/2);
-    const scale=Math.min(1,1300/Math.max(w,h));w=Math.max(100,Math.round(w*scale));h=Math.max(100,Math.round(h*scale));
-    const sctx=src.getContext("2d"),sd=sctx.getImageData(0,0,src.width,src.height),out=document.createElement("canvas");out.width=w;out.height=h;const od=out.getContext("2d").createImageData(w,h);
-    const sp=sd.data,dp=od.data,sw=src.width,sh=src.height;
-    for(let y=0;y<h;y++){const v=h===1?0:y/(h-1);for(let x=0;x<w;x++){const u=w===1?0:x/(w-1);const sx=(1-u)*(1-v)*p[0].x+u*(1-v)*p[1].x+u*v*p[2].x+(1-u)*v*p[3].x;const sy=(1-u)*(1-v)*p[0].y+u*(1-v)*p[1].y+u*v*p[2].y+(1-u)*v*p[3].y;const ix=Math.max(0,Math.min(sw-1,Math.round(sx))),iy=Math.max(0,Math.min(sh-1,Math.round(sy))),si=(iy*sw+ix)*4,di=(y*w+x)*4;dp[di]=sp[si];dp[di+1]=sp[si+1];dp[di+2]=sp[si+2];dp[di+3]=255;}}
-    out.getContext("2d").putImageData(od,0,0);return new Promise(res=>out.toBlob(res,"image/jpeg",.9));
+  async function cropScannerBlob(maxLongEdge=1800){
+    if(!scanSession.sourceCanvas||!scanSession.corners)throw new Error("no scan");
+    const out=await ChekiScanner.crop(scanSession.sourceCanvas,scanSession.corners,{tone:scanSession.tone,ratioMode:scanSession.ratioMode,rotation:scanSession.rotation,maxLongEdge});
+    return new Promise((res,rej)=>out.toBlob(b=>b?res(b):rej(new Error("blob failed")),"image/jpeg",.92));
   }
 
   async function makeThumbnail(blob){const bmp=await createImageBitmap(blob),c=document.createElement("canvas"),max=320,sc=Math.min(1,max/Math.max(bmp.width,bmp.height));c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);bmp.close?.();return new Promise(res=>c.toBlob(res,"image/jpeg",.78));}
@@ -981,39 +1131,100 @@
     const memberId=formValue(form,"memberId");if(!memberId){toast("メンバーを選択してください");return}
     const btns=$$("button",form);btns.forEach(b=>b.disabled=true);
     try{
-      const blob=await cropScannerBlob(),thumb=await makeThumbnail(blob),id=uid("img");
-      const meta={id,memberId,liveId:formValue(form,"liveId"),date:formValue(form,"date")||todayStr(),type:formValue(form,"type"),signed:checked(form,"signed"),favorite:checked(form,"favorite"),memo:formValue(form,"memo"),chekiNo:nextChekiNo(memberId),createdAt:new Date().toISOString()};
-      await mediaPut(id,blob,thumb);state.chekiImages.push(meta);state.settings.scanDefaults={memberId:meta.memberId,liveId:meta.liveId,date:meta.date,type:meta.type,signed:meta.signed,favorite:false};save();scanSession.lastMeta=meta;scanSession.sourceCanvas=null;scanSession.corners=null;
+      const blob=await cropScannerBlob(1800),thumb=await makeThumbnail(blob),id=uid("img");
+      const meta={id,memberId,liveId:formValue(form,"liveId"),date:formValue(form,"date")||todayStr(),type:formValue(form,"type"),signed:checked(form,"signed"),favorite:checked(form,"favorite"),memo:formValue(form,"memo"),chekiNo:nextChekiNo(memberId),createdAt:new Date().toISOString(),scanEngine:scanSession.detection?.engine||"",scanConfidence:scanSession.detection?.confidence||0,scanQuality:scanSession.quality?.score||null};
+      await mediaPut(id,blob,thumb);state.chekiImages.push(meta);state.settings.scanDefaults={memberId:meta.memberId,liveId:meta.liveId,date:meta.date,type:meta.type,signed:meta.signed,favorite:false};save();scanSession={...scanSession,lastMeta:meta,sourceCanvas:null,corners:null,detection:null,rotation:0,quality:null,previewCanvas:null};
       toast(`${memberById(memberId)?.name||"チェキ"} #${String(meta.chekiNo).padStart(4,"0")} を保存しました`);
       if(continueMode)renderScan(); else setRoute("album");
     }catch(e){console.error(e);alert("チェキ画像の保存に失敗しました。");btns.forEach(b=>b.disabled=false)}
   }
 
   function renderAlbum(){
-    pageTitle("チェキアルバム");
+    pageTitle("チェキ管理");
     const f=albumFilter;
-    let rows=[...state.chekiImages].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||"").localeCompare(a.createdAt||""));
-    if(f.memberId)rows=rows.filter(x=>x.memberId===f.memberId);if(f.liveId)rows=rows.filter(x=>x.liveId===f.liveId);if(f.month)rows=rows.filter(x=>monthKey(x.date)===f.month);if(f.signed)rows=rows.filter(x=>String(!!x.signed)===f.signed);if(f.favorite)rows=rows.filter(x=>String(!!x.favorite)===f.favorite);
+    let rows=[...state.chekiImages];
+    const q=(f.q||"").trim().toLocaleLowerCase("ja");
+    if(f.memberId)rows=rows.filter(x=>x.memberId===f.memberId);
+    if(f.liveId)rows=rows.filter(x=>x.liveId===f.liveId);
+    if(f.month)rows=rows.filter(x=>monthKey(x.date)===f.month);
+    if(f.signed)rows=rows.filter(x=>String(!!x.signed)===f.signed);
+    if(f.favorite)rows=rows.filter(x=>String(!!x.favorite)===f.favorite);
+    if(q)rows=rows.filter(x=>[
+      memberById(x.memberId)?.name,groupById(memberById(x.memberId)?.groupId)?.name,
+      liveById(x.liveId)?.title,x.memo,x.type,x.date
+    ].some(v=>String(v||"").toLocaleLowerCase("ja").includes(q)));
+    rows.sort((a,b)=>{
+      if(f.sort==="oldest")return (a.date||"").localeCompare(b.date||"")||(a.createdAt||"").localeCompare(b.createdAt||"");
+      if(f.sort==="number")return Number(b.chekiNo||0)-Number(a.chekiNo||0);
+      return (b.date||"").localeCompare(a.date||"")||(b.createdAt||"").localeCompare(a.createdAt||"");
+    });
     main.innerHTML=`
-      <section class="card album-filters"><div class="form-grid">
-        <div class="field"><label>メンバー</label><select id="albumMember">${memberOptions(f.memberId)}</select></div>
-        <div class="field"><label>イベント</label><select id="albumLive">${liveOptions(f.liveId)}</select></div>
-        <div class="field"><label>年月</label><input id="albumMonth" type="month" value="${safe(f.month)}"></div>
-        <div class="field"><label>絞り込み</label><select id="albumFlags"><option value="">すべて</option><option value="signed" ${f.signed==="true"?"selected":""}>サインあり</option><option value="favorite" ${f.favorite==="true"?"selected":""}>お気に入り</option></select></div>
-      </div></section>
-      <div class="section-title"><h2>${rows.length}枚</h2><button class="btn small" data-go="scan">＋スキャン</button></div>
-      ${rows.length?`<section class="album-grid">${rows.map(x=>`<button class="album-item" data-image-detail="${x.id}"><div class="album-photo"><img data-thumb-id="${x.id}" alt="チェキ ${safe(memberById(x.memberId)?.name||"")}"><span class="album-no">#${String(x.chekiNo||0).padStart(4,"0")}</span>${x.favorite?'<span class="album-fav">★</span>':""}</div><div class="album-caption"><b>${safe(memberById(x.memberId)?.name||"未設定")}</b><span>${safe(x.date||"")}</span></div></button>`).join("")}</section>`:`<section class="card empty"><div class="emoji">🖼️</div>まだスキャンしたチェキがありません</section>`}`;
-    const update=()=>{albumFilter.memberId=$("#albumMember").value;albumFilter.liveId=$("#albumLive").value;albumFilter.month=$("#albumMonth").value;const flag=$("#albumFlags").value;albumFilter.signed=flag==="signed"?"true":"";albumFilter.favorite=flag==="favorite"?"true":"";renderAlbum()};
-    ["#albumMember","#albumLive","#albumMonth","#albumFlags"].forEach(s=>$(s)?.addEventListener("change",update));
-    $$('[data-image-detail]').forEach(b=>b.onclick=()=>openChekiImageDetail(b.dataset.imageDetail));loadAlbumThumbs();bindRouteLinks();
+      <section class="card hero compact-hero">
+        <div class="row"><div><div class="kicker">CHEKI LIBRARY</div><h2>${state.chekiImages.length}枚を保存中</h2><div class="muted small">検索・編集・お気に入り・端末保存</div></div><button class="btn" data-go="scan">＋ スキャン</button></div>
+      </section>
+      <section class="card album-filters" style="margin-top:12px">
+        <div class="field wide"><label>検索</label><input id="albumSearch" value="${safe(f.q)}" placeholder="メンバー・イベント・メモを検索"></div>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>メンバー</label><select id="albumMember">${memberOptions(f.memberId)}</select></div>
+          <div class="field"><label>イベント</label><select id="albumLive">${liveOptions(f.liveId)}</select></div>
+          <div class="field"><label>年月</label><input id="albumMonth" type="month" value="${safe(f.month)}"></div>
+          <div class="field"><label>絞り込み</label><select id="albumFlags"><option value="">すべて</option><option value="signed" ${f.signed==="true"?"selected":""}>サインあり</option><option value="favorite" ${f.favorite==="true"?"selected":""}>お気に入り</option></select></div>
+          <div class="field"><label>並び順</label><select id="albumSort"><option value="newest" ${f.sort==="newest"?"selected":""}>新しい順</option><option value="oldest" ${f.sort==="oldest"?"selected":""}>古い順</option><option value="number" ${f.sort==="number"?"selected":""}>チェキ番号順</option></select></div>
+        </div>
+      </section>
+      <div class="section-title"><h2>${rows.length}枚</h2><button class="btn small secondary" data-go="cheki-storage">保存設定</button></div>
+      ${rows.length?`<section class="album-grid">${rows.map(x=>`<button class="album-item" data-image-detail="${x.id}"><div class="album-photo"><img data-thumb-id="${x.id}" alt="チェキ ${safe(memberById(x.memberId)?.name||"")}"><span class="album-no">#${String(x.chekiNo||0).padStart(4,"0")}</span>${x.favorite?'<span class="album-fav">★</span>':""}${x.scanQuality?`<span class="album-quality">${x.scanQuality}</span>`:""}</div><div class="album-caption"><b>${safe(memberById(x.memberId)?.name||"未設定")}</b><span>${safe(x.date||"")}${x.type?` · ${safe(x.type)}`:""}</span></div></button>`).join("")}</section>`:`<section class="card empty"><div class="emoji">🖼️</div><b>条件に合うチェキがありません</b><p>検索条件を変えるか、新しいチェキをスキャンしてください。</p></section>`}`;
+    const update=()=>{albumFilter.memberId=$("#albumMember").value;albumFilter.liveId=$("#albumLive").value;albumFilter.month=$("#albumMonth").value;albumFilter.sort=$("#albumSort").value;const flag=$("#albumFlags").value;albumFilter.signed=flag==="signed"?"true":"";albumFilter.favorite=flag==="favorite"?"true":"";renderAlbum()};
+    ["#albumMember","#albumLive","#albumMonth","#albumFlags","#albumSort"].forEach(s=>$(s)?.addEventListener("change",update));
+    let qt;$("#albumSearch").addEventListener("input",e=>{clearTimeout(qt);qt=setTimeout(()=>{albumFilter.q=e.target.value;renderAlbum()},260)});
+    $$('[data-image-detail]').forEach(b=>b.onclick=()=>openChekiImageDetail(b.dataset.imageDetail));
+    loadAlbumThumbs();bindRouteLinks();
   }
 
   async function loadAlbumThumbs(){for(const img of $$('[data-thumb-id]')){try{const rec=await mediaGet(img.dataset.thumbId);if(!rec)continue;const u=URL.createObjectURL(rec.thumb||rec.blob);img.onload=()=>URL.revokeObjectURL(u);img.src=u}catch(e){}}}
 
+  async function downloadChekiImage(id){
+    const m=state.chekiImages.find(x=>x.id===id),rec=await mediaGet(id);if(!m||!rec)return;
+    const member=(memberById(m.memberId)?.name||"cheki").replace(/[\\/:*?"<>|]/g,"_");
+    const a=document.createElement("a"),u=URL.createObjectURL(rec.blob);a.href=u;a.download=`${m.date||todayStr()}_${member}_${String(m.chekiNo||0).padStart(4,"0")}.jpg`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);
+    toast("画像を端末に保存しました");
+  }
+
+  function openChekiEdit(m){
+    openModal("チェキ情報を編集",`<form id="chekiEditForm" class="form">
+      <div class="form-grid">
+        <div class="field"><label>メンバー *</label><select name="memberId" required>${memberOptions(m.memberId)}</select></div>
+        <div class="field"><label>イベント</label><select name="liveId">${liveOptions(m.liveId)}</select></div>
+        <div class="field"><label>撮影日</label><input type="date" name="date" value="${safe(m.date||todayStr())}"></div>
+        <div class="field"><label>種類</label><select name="type">${["2ショット","ソロ","サインあり","サインなし","写メ","その他"].map(x=>`<option ${x===m.type?"selected":""}>${x}</option>`).join("")}</select></div>
+        <label class="check-row"><input type="checkbox" name="signed" ${m.signed?"checked":""}> サインあり</label>
+        <label class="check-row"><input type="checkbox" name="favorite" ${m.favorite?"checked":""}> お気に入り</label>
+        <div class="field wide"><label>メモ</label><textarea name="memo">${safe(m.memo||"")}</textarea></div>
+      </div><button class="btn full" type="submit">変更を保存</button></form>`,()=>{
+      $("#chekiEditForm").onsubmit=e=>{e.preventDefault();const f=e.currentTarget;Object.assign(m,{memberId:formValue(f,"memberId"),liveId:formValue(f,"liveId"),date:formValue(f,"date"),type:formValue(f,"type"),signed:checked(f,"signed"),favorite:checked(f,"favorite"),memo:formValue(f,"memo")});save();closeModal();renderAlbum();toast("チェキ情報を更新しました")};
+    });
+  }
+
   async function openChekiImageDetail(id){
-    const m=state.chekiImages.find(x=>x.id===id);if(!m)return;openModal("チェキ詳細",`<div class="cheki-detail"><div class="detail-image-wrap"><img id="detailChekiImage" alt="チェキ"></div><div class="card flat"><div class="row"><div><b>${safe(memberById(m.memberId)?.name||"未設定")}</b><div class="muted small">${safe(groupById(memberById(m.memberId)?.groupId)?.name||"")}</div></div><span class="pill">#${String(m.chekiNo||0).padStart(4,"0")}</span></div><div class="divider"></div><div class="stack small"><div>撮影日：${fmtDate(m.date)}</div><div>イベント：${safe(liveById(m.liveId)?.title||"未設定")}</div><div>種類：${safe(m.type||"")}</div><div>サイン：${m.signed?"あり":"なし"}</div>${m.memo?`<div>メモ：${safe(m.memo)}</div>`:""}</div></div><div class="grid two"><button class="btn secondary" id="toggleFavorite">${m.favorite?"★ お気に入り解除":"☆ お気に入り"}</button><button class="btn danger" id="deleteChekiImage">削除</button></div></div>`,async()=>{
+    const m=state.chekiImages.find(x=>x.id===id);if(!m)return;
+    openModal("チェキ詳細",`<div class="cheki-detail">
+      <div class="detail-image-wrap"><img id="detailChekiImage" alt="チェキ"></div>
+      <div class="card flat">
+        <div class="row"><div><b>${safe(memberById(m.memberId)?.name||"未設定")}</b><div class="muted small">${safe(groupById(memberById(m.memberId)?.groupId)?.name||"")}</div></div><span class="pill">#${String(m.chekiNo||0).padStart(4,"0")}</span></div>
+        <div class="divider"></div>
+        <div class="stack small"><div>撮影日：${fmtDate(m.date)}</div><div>イベント：${safe(liveById(m.liveId)?.title||"未設定")}</div><div>種類：${safe(m.type||"")}</div><div>サイン：${m.signed?"あり":"なし"}</div>${m.scanQuality?`<div>スキャン品質：${m.scanQuality}/100</div>`:""}${m.scanEngine?`<div>検出：${safe(m.scanEngine)}</div>`:""}${m.memo?`<div>メモ：${safe(m.memo)}</div>`:""}</div>
+      </div>
+      <div class="grid two">
+        <button class="btn secondary" id="toggleFavorite">${m.favorite?"★ お気に入り解除":"☆ お気に入り"}</button>
+        <button class="btn secondary" id="editChekiMeta">情報を編集</button>
+        <button class="btn secondary" id="downloadChekiImage">画像を端末に保存</button>
+        <button class="btn danger" id="deleteChekiImage">削除</button>
+      </div>
+    </div>`,async()=>{
       const rec=await mediaGet(id);if(rec){const u=URL.createObjectURL(rec.blob);const img=$("#detailChekiImage");img.onload=()=>URL.revokeObjectURL(u);img.src=u}
       $("#toggleFavorite").onclick=()=>{m.favorite=!m.favorite;save();closeModal();renderAlbum();toast(m.favorite?"お気に入りに追加しました":"お気に入りを解除しました")};
+      $("#editChekiMeta").onclick=()=>{closeModal();openChekiEdit(m)};
+      $("#downloadChekiImage").onclick=()=>downloadChekiImage(id);
       $("#deleteChekiImage").onclick=async()=>{if(!confirm("このスキャン画像を削除しますか？"))return;await mediaDelete(id);state.chekiImages=state.chekiImages.filter(x=>x.id!==id);save();closeModal();renderAlbum();toast("画像を削除しました")};
     });
   }
@@ -2046,6 +2257,13 @@
   }
 
   async function detectChekiRegions(c){
+    try{
+      const regions=await ChekiScanner.detectRegions(c);
+      if(regions?.length)return regions;
+    }catch(e){console.warn(e)}
+    return detectChekiRegionsFallback(c);
+  }
+  async function detectChekiRegionsFallback(c){
     const max=520,sc=Math.min(1,max/Math.max(c.width,c.height)),w=Math.round(c.width*sc),h=Math.round(c.height*sc),t=document.createElement("canvas");t.width=w;t.height=h;const ctx=t.getContext("2d",{willReadFrequently:true});ctx.drawImage(c,0,0,w,h);const d=ctx.getImageData(0,0,w,h).data;const cw=26,ch=26,boxes=[];
     for(let gy=0;gy<h;gy+=ch)for(let gx=0;gx<w;gx+=cw){let bright=0,total=0;for(let y=gy;y<Math.min(h,gy+ch);y+=3)for(let x=gx;x<Math.min(w,gx+cw);x+=3){const i=(y*w+x)*4,lum=.299*d[i]+.587*d[i+1]+.114*d[i+2];if(lum>190)bright++;total++;}if(total&&bright/total>.62)boxes.push({x:gx,y:gy,w:Math.min(cw,w-gx),h:Math.min(ch,h-gy)});}
     if(!boxes.length)return [{x:c.width*.05,y:c.height*.05,w:c.width*.9,h:c.height*.9}];
@@ -2055,12 +2273,41 @@
     out.sort((a,b)=>a.y-b.y||a.x-b.x);return out.slice(0,20).length?out.slice(0,20):[{x:c.width*.05,y:c.height*.05,w:c.width*.9,h:c.height*.9}];
   }
   function renderBatchScan(){
-    pageTitle("複数チェキ一括スキャン");main.innerHTML=`<section class="card hero"><div class="kicker">BATCH SCAN</div><h2>1枚の写真から複数チェキを切り分け</h2><p class="muted">机に並べたチェキを撮影し、検出した領域を個別保存します。</p></section><section class="card" style="margin-top:12px"><label class="btn scan-file-label">写真を選ぶ<input id="batchFile" type="file" accept="image/*" capture="environment" hidden></label>${batchSession.sourceCanvas?`<div class="row" style="margin-top:12px"><b>${batchSession.regions.length}枚候補を検出</b><button class="btn small secondary" id="redetectBatch">再検出</button></div><canvas id="batchCanvas" class="scan-canvas" style="margin-top:10px"></canvas>`:""}</section>${batchSession.sourceCanvas?`<section class="card" style="margin-top:12px"><form id="batchMetaForm" class="form"><div class="form-grid"><div class="field"><label>メンバー *</label><select name="memberId" required>${memberOptions(state.settings.scanDefaults.memberId)}</select></div><div class="field"><label>イベント</label><select name="liveId">${liveOptions(state.settings.scanDefaults.liveId||currentFieldLive()?.id||"")}</select></div><div class="field"><label>撮影日</label><input type="date" name="date" value="${todayStr()}"></div><div class="field"><label>種類</label><select name="type"><option>2ショット</option><option>ソロ</option><option>サインあり</option><option>サインなし</option><option>その他</option></select></div></div><div class="notice">黄色枠が保存対象です。枠をタップすると対象/除外を切り替えられます。</div><button class="btn full" type="submit">選択した候補を一括保存</button></form></section>`:""}`;
+    pageTitle("複数チェキ一括スキャン");main.innerHTML=`<section class="card hero"><div class="kicker">BATCH SCAN</div><h2>1枚の写真から複数チェキを高精度切り分け</h2><p class="muted">輪郭を検出して候補ごとに台形補正し、個別のチェキ画像として保存します。</p></section><section class="card" style="margin-top:12px"><label class="btn scan-file-label">写真を選ぶ<input id="batchFile" type="file" accept="image/*" capture="environment" hidden></label>${batchSession.sourceCanvas?`<div class="row" style="margin-top:12px"><b>${batchSession.regions.length}枚候補を検出</b><button class="btn small secondary" id="redetectBatch">再検出</button></div><canvas id="batchCanvas" class="scan-canvas" style="margin-top:10px"></canvas>`:""}</section>${batchSession.sourceCanvas?`<section class="card" style="margin-top:12px"><form id="batchMetaForm" class="form"><div class="form-grid"><div class="field"><label>メンバー *</label><select name="memberId" required>${memberOptions(state.settings.scanDefaults.memberId)}</select></div><div class="field"><label>イベント</label><select name="liveId">${liveOptions(state.settings.scanDefaults.liveId||currentFieldLive()?.id||"")}</select></div><div class="field"><label>撮影日</label><input type="date" name="date" value="${todayStr()}"></div><div class="field"><label>種類</label><select name="type"><option>2ショット</option><option>ソロ</option><option>サインあり</option><option>サインなし</option><option>その他</option></select></div></div><div class="notice">黄色枠が保存対象です。枠をタップすると対象/除外を切り替えられます。検出できない1枚は「チェキスキャン」で手動四隅補正できます。</div><button class="btn full" type="submit">選択した候補を一括保存</button></form></section>`:""}`;
     $("#batchFile").onchange=e=>{const f=e.target.files?.[0];if(f)loadBatchFile(f)};if(batchSession.sourceCanvas){mountBatchCanvas();$("#redetectBatch").onclick=async()=>{batchSession.regions=await detectChekiRegions(batchSession.sourceCanvas);batchSession.selected=new Set(batchSession.regions.map((_,i)=>i));renderBatchScan()};$("#batchMetaForm").onsubmit=e=>{e.preventDefault();saveBatchCheki(e.currentTarget)}}
   }
   async function loadBatchFile(file){try{const bmp=await createImageBitmap(file),max=2400,sc=Math.min(1,max/Math.max(bmp.width,bmp.height)),c=document.createElement("canvas");c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);bmp.close?.();batchSession.sourceCanvas=c;batchSession.regions=await detectChekiRegions(c);batchSession.selected=new Set(batchSession.regions.map((_,i)=>i));renderBatchScan()}catch(e){alert("画像を読み込めませんでした")}}
-  function mountBatchCanvas(){const out=$("#batchCanvas"),src=batchSession.sourceCanvas;if(!out||!src)return;const w=Math.min(900,src.width),sc=w/src.width;out.width=w;out.height=Math.round(src.height*sc);const ctx=out.getContext("2d"),draw=()=>{ctx.drawImage(src,0,0,out.width,out.height);batchSession.regions.forEach((r,i)=>{ctx.lineWidth=4;ctx.strokeStyle=batchSession.selected.has(i)?"#facc15":"#94a3b8";ctx.strokeRect(r.x*sc,r.y*sc,r.w*sc,r.h*sc);ctx.fillStyle="rgba(0,0,0,.7)";ctx.fillRect(r.x*sc,r.y*sc,28,24);ctx.fillStyle="#fff";ctx.font="bold 14px system-ui";ctx.fillText(String(i+1),r.x*sc+8,r.y*sc+17)})};draw();out.onclick=e=>{const b=out.getBoundingClientRect(),x=(e.clientX-b.left)*(out.width/b.width)/sc,y=(e.clientY-b.top)*(out.height/b.height)/sc;const i=batchSession.regions.findIndex(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h);if(i>=0){batchSession.selected.has(i)?batchSession.selected.delete(i):batchSession.selected.add(i);draw()}}}
-  async function cropRectBlob(c,r){const out=document.createElement("canvas"),scale=Math.min(1,1300/Math.max(r.w,r.h));out.width=Math.max(80,Math.round(r.w*scale));out.height=Math.max(80,Math.round(r.h*scale));out.getContext("2d").drawImage(c,r.x,r.y,r.w,r.h,0,0,out.width,out.height);return new Promise(res=>out.toBlob(res,"image/jpeg",.9))}
+  function pointInQuad(x,y,pts){
+    let inside=false;
+    for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+      const xi=pts[i].x,yi=pts[i].y,xj=pts[j].x,yj=pts[j].y;
+      const hit=((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi||1e-9)+xi);if(hit)inside=!inside;
+    }return inside;
+  }
+  function mountBatchCanvas(){
+    const out=$("#batchCanvas"),src=batchSession.sourceCanvas;if(!out||!src)return;
+    const w=Math.min(900,src.width),sc=w/src.width;out.width=w;out.height=Math.round(src.height*sc);
+    const ctx=out.getContext("2d"),draw=()=>{
+      ctx.drawImage(src,0,0,out.width,out.height);
+      batchSession.regions.forEach((r,i)=>{
+        const pts=(r.corners||[{x:r.x,y:r.y},{x:r.x+r.w,y:r.y},{x:r.x+r.w,y:r.y+r.h},{x:r.x,y:r.y+r.h}]).map(p=>({x:p.x*sc,y:p.y*sc}));
+        ctx.lineWidth=4;ctx.strokeStyle=batchSession.selected.has(i)?"#facc15":"#94a3b8";ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let k=1;k<4;k++)ctx.lineTo(pts[k].x,pts[k].y);ctx.closePath();ctx.stroke();
+        ctx.fillStyle="rgba(0,0,0,.75)";ctx.fillRect(pts[0].x,pts[0].y,30,25);ctx.fillStyle="#fff";ctx.font="bold 14px system-ui";ctx.fillText(String(i+1),pts[0].x+8,pts[0].y+17);
+      });
+    };draw();
+    out.onclick=e=>{
+      const b=out.getBoundingClientRect(),x=(e.clientX-b.left)*(out.width/b.width)/sc,y=(e.clientY-b.top)*(out.height/b.height)/sc;
+      const i=batchSession.regions.findIndex(r=>r.corners?pointInQuad(x,y,r.corners):(x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h));
+      if(i>=0){batchSession.selected.has(i)?batchSession.selected.delete(i):batchSession.selected.add(i);draw()}
+    };
+  }
+  async function cropRectBlob(c,r){
+    if(r.corners){
+      const out=await ChekiScanner.crop(c,r.corners,{tone:"natural",ratioMode:"cheki",rotation:0,maxLongEdge:1600});
+      return new Promise((res,rej)=>out.toBlob(b=>b?res(b):rej(new Error("blob failed")),"image/jpeg",.92));
+    }
+    const out=document.createElement("canvas"),scale=Math.min(1,1300/Math.max(r.w,r.h));out.width=Math.max(80,Math.round(r.w*scale));out.height=Math.max(80,Math.round(r.h*scale));out.getContext("2d").drawImage(c,r.x,r.y,r.w,r.h,0,0,out.width,out.height);return new Promise(res=>out.toBlob(res,"image/jpeg",.9))
+  }
   async function saveBatchCheki(form){const memberId=formValue(form,"memberId");if(!memberId){toast("メンバーを選択してください");return}const ids=[...batchSession.selected].sort((a,b)=>a-b);if(!ids.length){toast("保存対象を選択してください");return}try{toast(`${ids.length}枚を保存中…`);for(const i of ids){const blob=await cropRectBlob(batchSession.sourceCanvas,batchSession.regions[i]),thumb=await makeThumbnail(blob),id=uid("img"),meta={id,memberId,liveId:formValue(form,"liveId"),date:formValue(form,"date")||todayStr(),type:formValue(form,"type"),signed:false,favorite:false,memo:"一括スキャン",chekiNo:nextChekiNo(memberId),createdAt:new Date().toISOString()};await mediaPut(id,blob,thumb);state.chekiImages.push(meta)}save();batchSession={sourceCanvas:null,regions:[],selected:new Set()};toast(`${ids.length}枚保存しました`);setRoute("album")}catch(e){console.error(e);alert("一括保存に失敗しました")}}
 
   function renderIntegrations(){

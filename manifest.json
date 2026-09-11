@@ -1,12 +1,12 @@
 {
-  "name": "Live Manager v4.3",
+  "name": "Live Manager v5.0 Cheki Studio",
   "short_name": "Live Manager",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0d0f14",
   "theme_color": "#111318",
   "lang": "ja",
-  "description": "Live Manager v4.3 - TicketDive Worker自動設定済み公開版",
+  "description": "ライブ管理と高精度チェキスキャン・管理・保存をひとつにしたPWA",
   "icons": [
     {
       "src": "./icon.svg",

@@ -72,3 +72,31 @@ h1,h2,h3,p{margin-top:0}.topbar h1{margin:0;font-size:24px}
 #batchCanvas{touch-action:manipulation}
 .integration-badge{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid var(--line);font-size:10px;color:var(--muted)}
 @media(max-width:520px){.seatmap-wrap{min-height:340px}.seat-tier{height:78px;border-width:14px}.seat-stage{left:22%;right:22%}}
+
+
+/* v5.0 Cheki Studio */
+.cheki-studio-hero{background:linear-gradient(135deg,rgba(139,92,246,.28),rgba(236,72,153,.12),rgba(34,197,94,.08)),var(--surface)}
+.cheki-menu-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.cheki-menu-grid button{min-height:108px;text-align:left;padding:15px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,var(--surface2),rgba(29,34,48,.72));color:var(--text);display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:11px;align-items:center}
+.cheki-menu-grid button>span{grid-row:1/3;font-size:28px}
+.cheki-menu-grid button b{font-size:14px}.cheki-menu-grid button small{color:var(--muted);font-size:10px;line-height:1.4}
+.hub-album{margin-bottom:8px}
+.scan-stepper{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0}
+.scan-stepper span{padding:7px 4px;text-align:center;border-radius:999px;border:1px solid var(--line);font-size:10px;font-weight:900;color:var(--muted);background:var(--surface)}
+.scan-stepper span.active{background:rgba(139,92,246,.18);border-color:rgba(139,92,246,.55);color:#ddd6fe}
+.scan-preview-card{overflow:hidden}
+.scan-preview-wrap{position:relative;min-height:220px;margin:12px 0;border-radius:16px;overflow:hidden;background:#05070b;border:1px solid var(--line);display:grid;place-items:center}
+.scan-preview-wrap canvas{display:block;max-width:100%;max-height:58vh;width:auto;height:auto}
+.scan-preview-loading{position:absolute;inset:0;display:none;place-items:center;background:rgba(5,7,11,.72);backdrop-filter:blur(3px);font-size:12px;font-weight:900;color:#fff}
+.scan-quality{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:12px;border:1px solid var(--line);border-radius:15px;padding:12px;background:var(--surface2)}
+.quality-score{font-size:28px;font-weight:1000}.scan-quality small{color:var(--muted)}
+.quality-good{border-color:rgba(34,197,94,.4)}.quality-good .quality-score{color:#86efac}
+.quality-ok{border-color:rgba(59,130,246,.4)}.quality-ok .quality-score{color:#93c5fd}
+.quality-warn{border-color:rgba(245,158,11,.45)}.quality-warn .quality-score{color:#fde68a}
+.quality-bad{border-color:rgba(239,68,68,.45)}.quality-bad .quality-score{color:#fca5a5}
+.scan-tips{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin-top:14px}.scan-tips span{font-size:10px;border:1px solid var(--line);border-radius:999px;padding:6px 8px;color:#cbd5e1;background:var(--surface2)}
+.section-title.compact{margin:4px 0}.section-title.compact h2{font-size:14px}
+.compact-hero{padding:16px}.compact-hero h2{font-size:20px;margin:3px 0}
+.album-quality{position:absolute;top:6px;right:6px;padding:4px 6px;border-radius:8px;background:rgba(15,23,42,.78);font-size:9px;font-weight:900;color:#e2e8f0}
+@media(min-width:760px){.cheki-menu-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:520px){.cheki-menu-grid{grid-template-columns:1fr 1fr}.cheki-menu-grid button{min-height:100px;padding:12px}.scan-stepper span{font-size:9px}.scan-preview-wrap{min-height:180px}}
